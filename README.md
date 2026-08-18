@@ -1,5 +1,7 @@
 # the-universe
 
+[![CI](https://github.com/modirniya/the-universe/actions/workflows/ci.yml/badge.svg)](https://github.com/modirniya/the-universe/actions/workflows/ci.yml)
+
 Open-source **executable philosophy**: a runnable model of a
 simulation-hypothesis framework developed by Parham Modirniya. The codebase
 *is* the argument. Each module implements one theory, and a successful run

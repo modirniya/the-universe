@@ -26,6 +26,12 @@ cargo fmt
 
 CLI overrides: `--seed <N>`, `--ticks <N>`, `--out <DIR>`.
 
+CI (`.github/workflows/ci.yml`) runs fmt, clippy and tests on Linux, tests on
+macOS ARM, and a `claims` job that runs the documented experiment and asserts
+the *reproducible* parts of what the README says about it. If you change the
+README's headline numbers, update that job's thresholds too — it exists to stop
+the README and the code drifting apart. It never asserts on wall time.
+
 Always benchmark with `--release`; debug builds are ~20× slower and the numbers become meaningless.
 
 ## Architecture

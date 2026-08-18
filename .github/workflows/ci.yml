@@ -1,0 +1,115 @@
+# Uses only first-party actions and the toolchain preinstalled on GitHub
+# runners. The project's ground rule about resisting dependencies applies to
+# CI too: fewer third-party actions is less to audit.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings
+
+jobs:
+  check:
+    name: fmt, clippy, tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show toolchain
+        run: cargo --version && rustc --version
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-
+
+      - name: Formatting
+        run: cargo fmt --all -- --check
+
+      - name: Clippy
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Tests
+        run: cargo test --all-targets
+
+  claims:
+    name: the README's claims still hold
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: ${{ runner.os }}-cargo-release-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-release-
+
+      # "Benchmarks are claims: every performance statement in the README must
+      # be reproducible by a command in the repo." This job runs that exact
+      # command and checks the reproducible part of what the README says about
+      # it. Wall time is deliberately not asserted on -- it is a measurement,
+      # not a counter, and a shared CI runner is the worst place to measure it.
+      - name: Run the documented experiment
+        run: cargo run --release -- run --config configs/default.toml
+
+      - name: Artifacts were written
+        run: test -s out/runs.csv && test -s out/report.json
+
+      - name: Constraints reduce work, and the control is non-degenerate
+        run: |
+          python3 - <<'PY'
+          import csv, sys
+
+          rows = {r["label"]: r for r in csv.DictReader(open("out/runs.csv"))}
+          fail = []
+
+          # Every limit must cost less work than the unconstrained reference.
+          for label, row in rows.items():
+              if label == "all_off":
+                  continue
+              w = float(row["work_ratio"])
+              if w >= 1.0:
+                  fail.append(f"{label}: work_ratio {w:.4f} is not below 1")
+
+          # The headline: all limits together are dramatically cheaper.
+          all_on = float(rows["all_on"]["work_ratio"])
+          if all_on > 0.05:
+              fail.append(f"all_on: work_ratio {all_on:.4f} lost the ~190x saving")
+
+          # The reference must diverge from itself by exactly nothing.
+          if float(rows["all_off"]["mean_divergence"]) != 0.0:
+              fail.append("all_off diverges from itself")
+
+          print(f"{len(rows)} runs checked")
+          for label, row in rows.items():
+              print(f"  {label:<8} work {float(row['work_ratio']):.4f}  "
+                    f"div {float(row['mean_divergence']):.5f}")
+
+          if fail:
+              print("\nFAILED:", *fail, sep="\n  ")
+              sys.exit(1)
+          print("\nthe README's reproducible claims hold")
+          PY
+
+  macos:
+    name: builds on the target hardware
+    # The stated target is a MacBook Air M1, and macos-latest is ARM64.
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Tests
+        run: cargo test --all-targets
