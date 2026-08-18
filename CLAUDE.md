@@ -32,7 +32,7 @@ the *reproducible* parts of what the README says about it. If you change the
 README's headline numbers, update that job's thresholds too — it exists to stop
 the README and the code drifting apart. It never asserts on wall time.
 
-Always benchmark with `--release`; debug builds are ~20× slower and the numbers become meaningless.
+Always benchmark with `--release`; debug builds are close to 20× slower (18.7× on `configs/quick.toml`, M1) and the numbers become meaningless.
 
 ## Architecture
 
