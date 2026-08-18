@@ -1,0 +1,81 @@
+name: Bug report
+description: Something behaves differently from what the docs say
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Runs are deterministic: the same config and seed reproduce a universe
+        exactly. That makes a bug report here unusually cheap to act on, as
+        long as you include both.
+
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you expected, and what you got instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: config
+    attributes:
+      label: Config
+      description: >
+        The full contents of the TOML you ran, or the name of the file in
+        `configs/` if you did not change it.
+      render: toml
+    validations:
+      required: true
+
+  - type: input
+    id: seed
+    attributes:
+      label: Seed
+      description: >
+        From `world.seed`, or whatever you passed to `--seed`. With the config
+        above this is enough to reproduce the run exactly.
+      placeholder: "42"
+    validations:
+      required: true
+
+  - type: input
+    id: command
+    attributes:
+      label: Command
+      placeholder: cargo run --release -- run --config configs/default.toml
+    validations:
+      required: true
+
+  - type: textarea
+    id: output
+    attributes:
+      label: Output
+      description: >
+        The printed summary, or the relevant row of `out/runs.csv`. Paste the
+        text rather than a screenshot so it is searchable.
+      render: shell
+
+  - type: input
+    id: version
+    attributes:
+      label: Commit
+      description: "`git rev-parse --short HEAD`"
+    validations:
+      required: true
+
+  - type: input
+    id: platform
+    attributes:
+      label: Platform and Rust version
+      placeholder: macOS 26.5 arm64, rustc 1.96.0
+
+  - type: checkboxes
+    id: release
+    attributes:
+      label: Before submitting
+      options:
+        - label: >
+            If this is about performance, I built with `--release`. Debug builds
+            are close to 20x slower and their numbers are not meaningful.
+        - label: I ran `cargo test` and noted whether it passes.

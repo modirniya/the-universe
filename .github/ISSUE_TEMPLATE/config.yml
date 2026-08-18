@@ -1,0 +1,11 @@
+blank_issues_enabled: true
+contact_links:
+  - name: The theory stack
+    url: https://github.com/modirniya/the-universe/blob/main/docs/philosophy.md
+    about: What the code argues for, including the parts that cannot be coded.
+  - name: Contributing guide
+    url: https://github.com/modirniya/the-universe/blob/main/CONTRIBUTING.md
+    about: The five rules that are load-bearing rather than stylistic.
+  - name: Private contact
+    url: mailto:modirniya@gmail.com
+    about: For anything that does not belong in a public issue.

@@ -1,0 +1,47 @@
+name: Feature or roadmap work
+description: Propose something new, or pick up a roadmap milestone
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please open this before starting anything large, so you do not spend a
+        weekend on a design that conflicts with where the model is going.
+
+  - type: dropdown
+    id: milestone
+    attributes:
+      label: Does this belong to a roadmap milestone
+      options:
+        - "No, something else"
+        - "1. Nesting — layers hosting child layers under the degradation rule"
+        - "2. Pipe — the one-way serializing channel between layers"
+        - "3. Detection — agents determining from within whether limits apply"
+        - "4. Fine-tuning sweep — how thin the complexity band is"
+        - "5. Emergence — bootloader life"
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you want to build
+    validations:
+      required: true
+
+  - type: textarea
+    id: theory
+    attributes:
+      label: Which theory it implements, and what would falsify it in the model
+      description: >
+        Every module carries this in its docs, so it is worth settling before
+        any code exists.
+
+  - type: checkboxes
+    id: rules
+    attributes:
+      label: Compatibility
+      options:
+        - label: This keeps runs deterministic under a single seeded RNG.
+        - label: This keeps the physics pure, or does not touch it.
+        - label: This adds no new dependency, or the proposal says why one is needed.

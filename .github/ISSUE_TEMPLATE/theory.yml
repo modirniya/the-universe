@@ -1,0 +1,52 @@
+name: Theory or result objection
+description: A theory looks incoherent, a module does not implement what it claims, or a result is overstated
+labels: ["theory"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This is the most valuable feedback the project can get, so it has its
+        own form. See [`docs/philosophy.md`](../blob/main/docs/philosophy.md)
+        for the theory stack.
+
+        Out of scope: whether *we* are actually simulated. The model cannot
+        settle that, and its inability to is itself one of its claims — see
+        mutual blindness.
+
+  - type: dropdown
+    id: kind
+    attributes:
+      label: What kind of objection is this
+      options:
+        - A theory is internally incoherent
+        - A module does not implement the theory it claims to
+        - A result in the README is overstated by the evidence
+        - The philosophy doc says something the code contradicts
+        - Something else
+    validations:
+      required: true
+
+  - type: input
+    id: target
+    attributes:
+      label: Which theory or module
+      placeholder: "Theory 1 / constraints.rs, or: README Findings section"
+    validations:
+      required: true
+
+  - type: textarea
+    id: objection
+    attributes:
+      label: The objection
+      description: What is wrong, and why.
+    validations:
+      required: true
+
+  - type: textarea
+    id: falsify
+    attributes:
+      label: What would settle it
+      description: >
+        If there is a run, a test, or a measurement that would show you right
+        or wrong *within the model*, describe it. Not required — some
+        objections are purely about reasoning.
