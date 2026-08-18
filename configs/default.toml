@@ -1,0 +1,46 @@
+# The v0.1 universe. Sized so the full experiment finishes in well under a
+# minute on an M1 Air without the fans having an opinion about it.
+
+[world]
+width = 128          # base cells; subdividing space multiplies this internally
+height = 128
+ticks = 200
+seed = 42            # same seed, same universe
+init_density = 0.30  # fraction alive at the input event
+
+# A life-like rule written in densities rather than neighbour counts, so the
+# same law survives a change of resolution. These bands are exactly B3/S23 on a
+# radius-1 Moore neighbourhood.
+[rules]
+birth_lo = 0.3125
+birth_hi = 0.4375
+survive_lo = 0.1875
+survive_hi = 0.4375
+
+# Ignored by `run`, which sweeps every setting itself. Kept so a config can
+# describe one universe when the harness later grows a single-run mode.
+[constraints]
+discrete_space = true
+discrete_time = true
+speed_cap = true
+lazy_rendering = true
+
+# The dials behind the toggles.
+[params]
+subdivision = 2      # cells per base cell per axis when space is not discrete
+substeps = 2         # physics substeps per tick when time is not discrete
+capped_radius = 1    # influence radius with the speed cap in force
+uncapped_radius = 3  # influence radius without it
+block_size = 16      # edge of a lazily rendered region, in base cells
+
+# The probe: a fixed window, unmoving for the whole run. Holding observation
+# constant keeps the cost difference attributable to the optimization.
+[observer]
+x = 32
+y = 32
+width = 64
+height = 64
+
+[report]
+macro_grid = 16      # the logging threshold: the scale an outsider sees
+out_dir = "out"

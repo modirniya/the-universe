@@ -1,0 +1,25 @@
+# A small universe for iterating on code. Too short to draw conclusions from.
+
+[world]
+width = 48
+height = 48
+ticks = 40
+seed = 42
+init_density = 0.30
+
+[observer]
+x = 8
+y = 8
+width = 24
+height = 24
+
+[params]
+subdivision = 2
+substeps = 2
+capped_radius = 1
+uncapped_radius = 3
+block_size = 8
+
+[report]
+macro_grid = 8
+out_dir = "out/quick"

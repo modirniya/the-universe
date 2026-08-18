@@ -1,0 +1,19 @@
+[package]
+name = "the-universe"
+version = "0.1.0"
+edition = "2024"
+description = "Executable philosophy: a runnable model of a simulation-hypothesis framework. Physical limits as resource optimizations."
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/modirniya/the-universe"
+readme = "README.md"
+keywords = ["simulation", "cellular-automaton", "philosophy", "determinism"]
+categories = ["simulation"]
+
+[dependencies]
+serde = { version = "1.0.229", features = ["derive"] }
+toml = "1.1.4"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
