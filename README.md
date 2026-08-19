@@ -35,6 +35,7 @@ cheaper without changing what it produces?*
 cargo run --release -- run  --config configs/default.toml   # Theory 1: what the limits cost
 cargo run --release -- nest --config configs/nesting.toml   # Theory 2: how deep a chain gets
 cargo run --release -- pipe --config configs/pipe.toml      # Theory 3: what survives the crossing
+cargo run --release -- detect --config configs/detect.toml  # Detection: which limits are findable
 ```
 
 The `run` experiment takes about 11 seconds on an M1 Air; `nest` and `pipe`
@@ -43,7 +44,7 @@ is a much smaller world for iterating on code — too short to draw conclusions
 from.
 
 ```sh
-cargo test                          # 136 tests, most of them on the physics
+cargo test                          # 158 tests, most of them on the physics
 cargo run --release -- --help
 ```
 
@@ -227,6 +228,61 @@ The sweep now reports the event count beside every row and refuses to print a
 correlation below five, because a high threshold admitting a handful of events
 is exactly the situation that manufactures perfect correlations out of noise.
 
+## v0.4: detection
+
+The milestone where the model argues against itself. v0.1 established that the
+creator's limits are worth having. This asks whether they are *findable* by
+something with no access to anything outside its own universe.
+
+```sh
+cargo run --release -- detect --config configs/detect.toml
+```
+
+An inhabitant is not an agent — it is a measuring apparatus with an honest
+access restriction. It reads its own region of its own world, one tick at a
+time, through the same `sample` every cell uses. It never sees a `Constraints`,
+and cannot look at a second universe for comparison.
+
+```
+                            signal        with     without       verdict
+discrete_space         min_feature      1.0000      1.0000     invisible
+speed_cap          influence_speed      1.0000      3.0000         found
+discrete_time      influence_speed      1.0000      2.0000         found
+lazy_rendering          smoothness      0.0002      0.0001     invisible
+```
+
+**Pixelation leaves no fingerprint.** An inhabitant measures in cells because it
+is made of them, so subdividing space leaves its ruler exactly where it was. The
+smallest distinguishable separation is one unit in every universe, and always
+will be.
+
+**The speed of influence is measurable** — count how far new life appears from
+anything that was alive the tick before. But **that number is a product**,
+`radius × substeps`, and no amount of measuring it more carefully will factor
+it. Three substeps of radius one and one substep of radius three read
+identically. The v0.1 coupling comes back here as a limit on what can be
+*known*, not merely on what can be built.
+
+**Looking is what conceals lazy rendering.** The framework defines a probe as
+the event that forces full-resolution computation of a region — so an inhabitant
+examining its surroundings *is* a probe, and renders what it looks at. Run the
+same inhabitant on the same coarse frontier both ways and the contrast is exact:
+smoothness 0.0002 when its looking renders, 0.0108 when it can somehow read
+without rendering. What hides this limit is not distance or subtlety. It is that
+observing without observing is a contradiction, so the limit is hidden in
+principle.
+
+**Two guards this needed.** A relative-difference test alone called 0.0002
+against 0.0001 a fifty percent difference and reported a detection built
+entirely from noise; detections now need an absolute floor as well. And an
+earlier test asserted that a generous speed bound goes unreached — true at one
+inhabitant placement, false at another. The ceiling is the invariant; saturation
+is a local observation and is reported as one.
+
+**What none of this shows.** An inhabitant cannot learn from any of this that it
+is simulated. It learns which of its own laws have the shape of an optimization,
+which is the most the model allows anyone on the inside to know.
+
 ## Theory → module map
 
 Each module's docs state which theory it implements and what would falsify it
@@ -243,6 +299,7 @@ Each module's docs state which theory it implements and what would falsify it
 | `budget` | The degradation rule; what a layer may spend | 2 |
 | `layer` | Nesting: layers hosting layers, each poorer than its host | 2 |
 | `pipe` | The one-way serializing channel; the horizon and the logging threshold | 3, 4 |
+| `detector` | Whether an inhabitant can find the limits from inside | 1, 4 |
 | `report` | CSV, JSON, and a summary that declines to overstate the result | 4 |
 
 The macro grid that `report` compares runs on is the **logging threshold** from
@@ -303,15 +360,13 @@ looked at).
 ## Roadmap
 
 Done: **v0.1** limits as optimizations, **v0.2** nesting and degradation,
-**v0.3** the pipe.
+**v0.3** the pipe, **v0.4** detection.
 
 Next, in order:
 
-1. **Detection** — agents inside a layer trying to determine, from within,
-   whether they are running under limits.
-2. **Fine-tuning sweep** — how thin the band of complexity-producing constants
+1. **Fine-tuning sweep** — how thin the band of complexity-producing constants
    actually is.
-3. **Emergence** — bootloader life. The hardest and slowest; emergence cannot
+2. **Emergence** — bootloader life. The hardest and slowest; emergence cannot
    be scheduled.
 
 Also later, not scoped: a Python notebook shell for analysing experiment

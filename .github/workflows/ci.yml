@@ -72,11 +72,15 @@ jobs:
       - name: Run the documented pipe relay
         run: cargo run --release -- pipe --config configs/pipe.toml
 
+      - name: Run the documented detection survey
+        run: cargo run --release -- detect --config configs/detect.toml
+
       - name: Artifacts were written
         run: |
           test -s out/runs.csv && test -s out/report.json
           test -s out/nesting/chain.csv && test -s out/nesting/chain.json
           test -s out/pipe/pipe.csv && test -s out/pipe/pipe.json
+          test -s out/detect/detection.csv && test -s out/detect/detection.json
 
       - name: Constraints reduce work, and the control is non-degenerate
         run: |
@@ -197,6 +201,46 @@ jobs:
               print("\nFAILED:", *fail, sep="\n  ")
               sys.exit(1)
           print("\npipe claims hold")
+          PY
+
+      - name: Detection findings hold
+        run: |
+          python3 - <<'PY'
+          import csv, sys
+
+          rows = list(csv.DictReader(open("out/detect/detection.csv")))
+          honest = [r for r in rows if r["gaze"] == "looking renders"]
+          passive = [r for r in rows if r["gaze"] == "reads without rendering"]
+          fail = []
+
+          def verdict(rows, limit):
+              hit = [r for r in rows if r["limit"] == limit]
+              if not hit:
+                  fail.append(f"{limit} missing from the survey")
+                  return None
+              return hit[0]["detectable"] == "true"
+
+          # The cell is the ruler.
+          if verdict(honest, "discrete_space"):
+              fail.append("discrete_space should leave no fingerprint")
+          # The speed of influence is measurable.
+          if not verdict(honest, "speed_cap"):
+              fail.append("speed_cap should be findable from inside")
+          # Looking is what conceals lazy rendering: invisible when the
+          # inhabitant renders, visible to a passive reader.
+          if verdict(honest, "lazy_rendering"):
+              fail.append("lazy_rendering should be concealed by the act of looking")
+          if not verdict(passive, "lazy_rendering"):
+              fail.append("lazy_rendering should be visible to a passive reader")
+
+          for r in rows:
+              print(f"  {r['gaze']:<24} {r['limit']:<16} {r['signal']:<16} "
+                    f"{r['with_limit']:>8} vs {r['without_limit']:>8}  {r['detectable']}")
+
+          if fail:
+              print("\nFAILED:", *fail, sep="\n  ")
+              sys.exit(1)
+          print("\ndetection findings hold")
           PY
 
   macos:

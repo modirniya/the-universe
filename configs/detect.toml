@@ -1,0 +1,31 @@
+# Detection: can an inhabitant tell, from the inside, that it is running under
+# limits?
+#
+# The inhabitant is placed on the observer's region, which straddles rendered
+# ground and the coarse ground beyond it. One living wholly inside what is
+# rendered finds full texture whatever the config says, because looking is what
+# renders a region.
+
+[world]
+width = 96
+height = 96
+ticks = 120
+seed = 42
+init_density = 0.30
+
+[params]
+subdivision = 2
+substeps = 2
+capped_radius = 1
+uncapped_radius = 3
+block_size = 16
+
+[observer]
+x = 24
+y = 24
+width = 48
+height = 48
+
+[report]
+macro_grid = 16
+out_dir = "out/detect"

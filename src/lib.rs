@@ -24,6 +24,7 @@
 //! - [`experiment`] — the benchmark that compares constrained to unconstrained
 //! - [`layer`] — nesting: layers hosting layers, each poorer than its host
 //! - [`pipe`] — the one-way serializing channel between layers
+//! - [`detector`] — whether an inhabitant can find the limits from inside
 //! - [`report`] — CSV, JSON and a summary that declines to overstate the result
 //! - [`rng`] — the creator's input channel; the reason runs are reproducible
 //!
@@ -40,6 +41,7 @@
 pub mod budget;
 pub mod config;
 pub mod constraints;
+pub mod detector;
 pub mod experiment;
 pub mod layer;
 pub mod observer;

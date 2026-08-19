@@ -89,11 +89,26 @@ fn overlaps_wrapped(a0: usize, alen: usize, b0: usize, blen: usize, n: usize) ->
 /// lazy rendering off every block stays resolved and this is a no-op after the
 /// first call.
 pub fn observe(w: &World, probe: &Probe, tick: u64, seed: u64, lazy: bool) -> (World, Work) {
+    observe_all(w, std::slice::from_ref(probe), tick, seed, lazy)
+}
+
+/// The same, for a universe with more than one observer.
+///
+/// A region is resolved if *anything* is looking at it. This matters for
+/// detection: an inhabitant that examines its surroundings is itself a probe by
+/// the framework's own definition, so its looking renders what it looks at.
+pub fn observe_all(w: &World, probes: &[Probe], tick: u64, seed: u64, lazy: bool) -> (World, Work) {
     let mut next = w.clone();
     let mut work = Work::default();
 
     let observed = if lazy {
-        probe.observed_blocks(&w.geom)
+        let mut acc = vec![false; w.geom.blocks()];
+        for p in probes {
+            for (b, seen) in p.observed_blocks(&w.geom).into_iter().enumerate() {
+                acc[b] |= seen;
+            }
+        }
+        acc
     } else {
         vec![true; w.geom.blocks()]
     };
@@ -185,6 +200,31 @@ mod tests {
     #[test]
     fn coverage_is_a_fraction() {
         assert!((probe().coverage(32, 32) - 0.0625).abs() < 1e-12);
+    }
+
+    #[test]
+    fn a_second_observer_resolves_more_ground() {
+        let w = World::seed(geom(), 7, 0.3);
+        let far = Probe {
+            x: 24,
+            y: 24,
+            width: 8,
+            height: 8,
+        };
+        let (one, _) = observe_all(&w, &[probe()], 0, 7, true);
+        let (two, _) = observe_all(&w, &[probe(), far], 0, 7, true);
+        assert!(
+            two.resolved.iter().filter(|r| **r).count()
+                > one.resolved.iter().filter(|r| **r).count(),
+            "anything looking should force resolution"
+        );
+    }
+
+    #[test]
+    fn observing_with_no_probes_leaves_nothing_resolved() {
+        let w = World::seed(geom(), 7, 0.3);
+        let (next, _) = observe_all(&w, &[], 0, 7, true);
+        assert!(next.resolved.iter().all(|r| !*r));
     }
 
     #[test]

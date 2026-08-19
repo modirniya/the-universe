@@ -40,6 +40,13 @@ make the universe meaningfully cheaper, or made it so different that an
 observer could trivially tell. See "Findings" in the README for what actually
 happened, including the one limit that turned out not to be free.
 
+**Can an inhabitant tell?** `detector` asks this, and the answer is partial.
+Pixelation is invisible because the cell is the ruler. The speed of influence is
+measurable but arrives as a product that cannot be factored, so an inhabitant
+can know it is constrained without learning how. Lazy rendering is concealed by
+the act of measuring it, since looking is what forces a region into full
+resolution — hidden not by subtlety but by contradiction.
+
 ---
 
 ## 2. Nesting and degradation

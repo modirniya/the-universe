@@ -6,6 +6,7 @@ use std::process::ExitCode;
 
 use the_universe::budget::Budget;
 use the_universe::config::Config;
+use the_universe::detector::{self, Gaze, Inhabitant};
 use the_universe::{experiment, layer, pipe, report};
 
 const USAGE: &str = "\
@@ -15,6 +16,7 @@ USAGE:
     the-universe run  --config <FILE> [OPTIONS]
     the-universe nest --config <FILE> [OPTIONS]
     the-universe pipe --config <FILE> [OPTIONS]
+    the-universe detect --config <FILE> [OPTIONS]
 
 COMMANDS:
     run     Compare an unconstrained universe against one with each limit in
@@ -29,6 +31,10 @@ COMMANDS:
             report what survived: whether the arrangement did, whether the
             timing and magnitude did, and what a parent sees at each logging
             threshold. (Theory 3: black holes as pipes.)
+
+    detect  Measure a universe from inside it, with no access to its config,
+            and report which of its limits leave a fingerprint an inhabitant
+            could find. (Detection.)
 
 OPTIONS:
     --config <FILE>   Universe definition (TOML). Required.
@@ -79,6 +85,8 @@ enum Command {
     Nest,
     /// Theory 3: what survives a one-way serializing channel.
     Pipe,
+    /// Detection: which limits are findable from inside.
+    Detect,
 }
 
 /// `Ok(None)` means help was requested.
@@ -94,9 +102,10 @@ fn parse(argv: Vec<String>) -> Result<Option<Args>, String> {
         "run" => Command::Run,
         "nest" => Command::Nest,
         "pipe" => Command::Pipe,
+        "detect" => Command::Detect,
         other => {
             return Err(format!(
-                "unknown command `{other}`; the commands are `run`, `nest` and `pipe`"
+                "unknown command `{other}`; the commands are `run`, `nest`, `pipe` and `detect`"
             ));
         }
     };
@@ -177,7 +186,43 @@ fn execute(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
         Command::Run => execute_run(&cfg, &out_dir),
         Command::Nest => execute_nest(&cfg, &out_dir, args.budget),
         Command::Pipe => execute_pipe(&cfg, &out_dir),
+        Command::Detect => execute_detect(&cfg, &out_dir),
     }
+}
+
+fn execute_detect(cfg: &Config, out_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    // Straddling the observed region and the coarse ground beyond it, so that
+    // there is coarse ground in reach at all. Whether the inhabitant can still
+    // see it once it looks is the question.
+    let who = Inhabitant {
+        x: cfg.observer.x + cfg.observer.width / 2,
+        y: cfg.observer.y + cfg.observer.height / 2,
+        width: cfg.observer.width,
+        height: cfg.observer.height,
+    };
+
+    println!(
+        "universe: {}x{} base cells, {} ticks, seed {}",
+        cfg.world.width, cfg.world.height, cfg.world.ticks, cfg.world.seed
+    );
+    println!(
+        "inhabitant: {}x{} region at ({}, {})\n",
+        who.width, who.height, who.x, who.y
+    );
+
+    let rendering = detector::investigate_all(cfg, &who, Gaze::Rendering);
+    let passive = detector::investigate_all(cfg, &who, Gaze::Passive);
+    print!("{}", report::detect_report(&rendering, &passive));
+
+    let mut all = rendering.clone();
+    all.extend(passive.iter().cloned());
+    let written = report::write_detect(&all, out_dir)?;
+    println!(
+        "\nwrote {} and {}",
+        written.csv.display(),
+        written.json.display()
+    );
+    Ok(())
 }
 
 fn execute_pipe(cfg: &Config, out_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
@@ -320,6 +365,12 @@ mod tests {
     #[test]
     fn unknown_command_is_rejected() {
         assert!(parse(argv("simulate --config c.toml")).is_err());
+    }
+
+    #[test]
+    fn detect_is_a_command() {
+        let a = parse(argv("detect --config c.toml")).unwrap().unwrap();
+        assert_eq!(a.command, Command::Detect);
     }
 
     #[test]

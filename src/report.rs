@@ -11,6 +11,7 @@
 //! output format is part of the claim, so it is worth being able to read the
 //! code that produces it.
 
+use crate::detector::Finding;
 use crate::experiment::{Comparison, Experiment};
 use crate::layer::Chain;
 use crate::pipe::{self, Horizon, Relay};
@@ -661,6 +662,198 @@ fn pipe_verdict(relay: &Relay) -> String {
     s.push_str(
         "\nthe child was not told it was being read, and holds no type that could tell it.\n\
          mutual blindness here is enforced by the compiler rather than by convention.\n",
+    );
+    s
+}
+
+// ---------------------------------------------------------------------------
+// Detection: what a limit looks like from inside
+// ---------------------------------------------------------------------------
+
+const DETECT_COLUMNS: &[&str] = &[
+    "gaze",
+    "limit",
+    "signal",
+    "with_limit",
+    "without_limit",
+    "detectable",
+    "influence_speed_with",
+    "influence_speed_without",
+    "smoothness_with",
+    "smoothness_without",
+];
+
+pub fn detect_to_csv(findings: &[Finding]) -> String {
+    let mut s = DETECT_COLUMNS.join(",");
+    s.push('\n');
+    for f in findings {
+        let _ = writeln!(
+            s,
+            "{},{},{},{:.6},{:.6},{},{:.6},{:.6},{:.6},{:.6}",
+            f.gaze.label(),
+            f.limit,
+            f.signal,
+            f.with_value,
+            f.without_value,
+            f.detectable,
+            f.with.influence_speed,
+            f.without.influence_speed,
+            f.with.smoothness,
+            f.without.smoothness,
+        );
+    }
+    s
+}
+
+pub fn detect_to_json(findings: &[Finding]) -> String {
+    let mut s = String::from("{\n  \"limits\": [\n");
+    for (i, f) in findings.iter().enumerate() {
+        let _ = write!(
+            s,
+            "    {{\"limit\": \"{}\", \"signal\": \"{}\", \"with\": {:.6}, \
+             \"without\": {:.6}, \"detectable\": {}, \"gaze\": \"{}\", \"note\": \"{}\"}}",
+            f.limit,
+            f.signal,
+            f.with_value,
+            f.without_value,
+            f.detectable,
+            f.gaze.label(),
+            f.note
+        );
+        if i + 1 < findings.len() {
+            s.push(',');
+        }
+        s.push('\n');
+    }
+    s.push_str("  ]\n}\n");
+    s
+}
+
+pub fn write_detect(findings: &[Finding], out_dir: &Path) -> io::Result<Written> {
+    std::fs::create_dir_all(out_dir)?;
+    let csv = out_dir.join("detection.csv");
+    let json = out_dir.join("detection.json");
+    std::fs::write(&csv, detect_to_csv(findings))?;
+    std::fs::write(&json, detect_to_json(findings))?;
+    Ok(Written { csv, json })
+}
+
+/// Both gazes side by side. The contrast is the result.
+pub fn detect_report(rendering: &[Finding], passive: &[Finding]) -> String {
+    let mut s = String::new();
+    s.push_str("== an inhabitant whose looking renders what it looks at ==\n\n");
+    s.push_str(&detect_summary(rendering));
+    s.push_str("\n== the same inhabitant, hypothetically able to read without rendering ==\n\n");
+    s.push_str(&detect_summary(passive));
+    s.push_str(&gaze_contrast(rendering, passive));
+    s
+}
+
+/// What changed between the two gazes, and what that means.
+fn gaze_contrast(rendering: &[Finding], passive: &[Finding]) -> String {
+    let mut s = String::from("\n== what the difference shows ==\n\n");
+    let mut any = false;
+    for (r, p) in rendering.iter().zip(passive.iter()) {
+        if r.detectable != p.detectable {
+            any = true;
+            let _ = writeln!(
+                s,
+                "{} is {} to an inhabitant that renders by looking, and {} to one that does not.",
+                r.limit,
+                if r.detectable { "visible" } else { "invisible" },
+                if p.detectable { "visible" } else { "invisible" }
+            );
+        }
+    }
+    if any {
+        s.push_str(
+            "\nso what conceals it is the act of looking, not where the inhabitant happens to\n\
+             live. the framework defines a probe as the event that forces full-resolution\n\
+             computation, which makes reading without rendering not a hard measurement but a\n\
+             contradiction. a limit hidden this way is hidden in principle.\n",
+        );
+    } else {
+        s.push_str("both gazes reach the same verdict on every limit.\n");
+    }
+    s
+}
+
+pub fn detect_summary(findings: &[Finding]) -> String {
+    let mut s = String::new();
+
+    s.push_str(
+        "an inhabitant measuring its own region, with no access to the config, the\n\
+         constraint flags, or any second universe to compare against\n\n",
+    );
+
+    let _ = writeln!(
+        s,
+        "{:<16}  {:>16}  {:>10}  {:>10}  {:>12}",
+        "limit", "signal", "with", "without", "verdict"
+    );
+    let _ = writeln!(s, "{}", "-".repeat(72));
+    for f in findings {
+        let _ = writeln!(
+            s,
+            "{:<16}  {:>16}  {:>10.4}  {:>10.4}  {:>12}",
+            f.limit,
+            f.signal,
+            f.with_value,
+            f.without_value,
+            if f.detectable { "found" } else { "invisible" }
+        );
+    }
+
+    s.push('\n');
+    for f in findings {
+        let _ = writeln!(s, "{:<16} {}", f.limit, f.note);
+    }
+
+    s.push('\n');
+    s.push_str(&detect_verdict(findings));
+    s
+}
+
+fn detect_verdict(findings: &[Finding]) -> String {
+    let mut s = String::new();
+    let found: Vec<&str> = findings
+        .iter()
+        .filter(|f| f.detectable)
+        .map(|f| f.limit)
+        .collect();
+    let hidden: Vec<&str> = findings
+        .iter()
+        .filter(|f| !f.detectable)
+        .map(|f| f.limit)
+        .collect();
+
+    if !found.is_empty() {
+        let _ = writeln!(s, "findable from inside: {}", found.join(", "));
+    }
+    if !hidden.is_empty() {
+        let _ = writeln!(s, "leaves no fingerprint: {}", hidden.join(", "));
+    }
+
+    // The confound is the interesting part and deserves saying out loud.
+    let speed_movers: Vec<&str> = findings
+        .iter()
+        .filter(|f| f.signal == "influence_speed" && f.detectable)
+        .map(|f| f.limit)
+        .collect();
+    if speed_movers.len() > 1 {
+        let _ = writeln!(
+            s,
+            "\n{} all move the same statistic and nothing else, so an inhabitant can\n\
+             measure the speed of influence but cannot say which limit set it. detecting\n\
+             that you are constrained is not the same as learning how.",
+            speed_movers.join(" and ")
+        );
+    }
+
+    s.push_str(
+        "\nnone of this tells an inhabitant whether it is simulated. it tells it which of\n\
+         its own laws have the shape of an optimization -- which is the most the model\n\
+         allows anyone on the inside to know.\n",
     );
     s
 }
