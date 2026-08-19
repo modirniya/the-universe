@@ -8,7 +8,11 @@ Open-source **executable philosophy**: a runnable model of a simulation-hypothes
 
 **Honest framing, which is a deliverable and not a disclaimer:** running this proves the ideas are *coherent*, not that our universe works this way. The model makes falsifiable predictions only about its own behaviour. Any summary the code prints must decline to overstate the result (`report::verdict` ends with this and a test enforces it). Philosophy that can't be coded lives in `docs/philosophy.md`, not in the code.
 
-v0.1 through v0.3 are complete: one layer with four constraint toggles and a benchmark (Theory 1), chains of layers under the degradation rule (Theory 2), and the one-way serializing channel between layers (Theories 3 and 4).
+v0.1 through v0.7 are complete: the six theories, plus a WebAssembly build and a browser viewer.
+
+## Layout
+
+A workspace. `universe-core` is the crate at the repository root — the six milestones, two dependencies, unchanged by the split. `crates/universe-web` is a thin wasm-bindgen bridge that owns no physics. `web/` is the static viewer. The core stays at the root because tests and the CLI resolve `configs/...` relative to the package root; moving it would change every documented command.
 
 ## Commands
 
@@ -20,7 +24,7 @@ cargo run --release -- pipe --config configs/pipe.toml     # Theory 3 relay, <1s
 cargo run --release -- detect --config configs/detect.toml # Detection survey, ~10s
 cargo run --release -- sweep  --config configs/sweep.toml  # Theory 6 sweep, ~6s at 21 steps
 cargo run --release -- boot   --config configs/boot.toml   # Theory 5 boot chain, ~5s
-cargo test                                                 # 205 tests
+cargo test --workspace                                     # native suite
 cargo test physics::                                       # one module
 cargo test blinker_oscillates_with_period_two              # one test by name
 cargo test --test determinism                              # the same-seed-same-universe suite
@@ -62,6 +66,7 @@ Single crate. Module names match theory names — this is deliberate and load-be
 | `detector` | Inhabitant measurements; which limits are findable from inside |
 | `sweep` | Fine-tuning: scores each rule setting, counts distinct laws |
 | `bootloader` | Cluster tracking, bootloader detection, the boot chain |
+| `golden` | The pinned reference universe and its fingerprint |
 | `report` | CSV, JSON, printed summary and verdict |
 | `config` | TOML loading and validation |
 
@@ -146,9 +151,13 @@ From v0.3:
 
 ## Roadmap
 
+**Determinism is now a cross-target invariant.** `universe_core::golden` pins one reference universe and reduces it to a `u64`. The native suite and the WebAssembly suite each assert `GOLDEN_FINGERPRINT`; neither sees the other's answer. If a change to physics moves that number legitimately, update the constant *and say so in the commit* — a silent update makes the check meaningless. If it moves without a deliberate change, that is a finding about the first rule, not a flaky test.
+
+**The viewer contains no physics.** `web/app.js` draws and wires controls; every rule comes from the core through wasm. Do not reimplement a fast approximation in JS — the page would then be showing a different universe from the one the findings describe.
+
 **The original roadmap is complete**: v0.1 (limits as optimizations), v0.2 (nesting and degradation), v0.3 (the pipe), v0.4 (detection), v0.5 (fine-tuning sweep), v0.6 (bootloader life).
 
-Unscheduled and still open: a Python notebook shell for analysing output, visuals, a WASM build. None of these are in the crate's scope as it stands; all three were named "later, not now" at the start and remain so unless Parham says otherwise. Also later: Python notebook shell for analysing output, visuals, WASM build.
+Done in phase 2: v0.7 (workspace split, WebAssembly, the viewer, Pages deploy). The Python notebook shell is v0.8. The research track — seeded replicators, evolution — stays deliberately unscheduled. Also later: Python notebook shell for analysing output, visuals, WASM build.
 
 This order is firm. Finish a milestone before starting the next, and do not widen the current one to include the next even where they touch — layers currently cannot reach each other, and that omission belongs to the pipe milestone, not this one.
 
