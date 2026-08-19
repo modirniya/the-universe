@@ -7,7 +7,7 @@
 
 use std::path::Path;
 
-use the_universe::bootloader::{self, MIN_DISPLACEMENT, MIN_LIFETIME};
+use the_universe::bootloader::{self, MIN_LIFETIME};
 use the_universe::budget::Budget;
 use the_universe::config::Config;
 use the_universe::constraints::Constraints;

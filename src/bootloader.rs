@@ -513,7 +513,7 @@ mod tests {
         assert_eq!(cs.len(), 1, "the seam must not split a cluster");
         let cx = cs[0].cx;
         assert!(
-            cx < 1.5 || cx > 30.5,
+            !(1.5..=30.5).contains(&cx),
             "centroid should sit near the seam, got {cx}"
         );
     }
