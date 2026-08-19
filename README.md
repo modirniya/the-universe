@@ -32,15 +32,17 @@ cheaper without changing what it produces?*
 ## Quick start
 
 ```sh
-cargo run --release -- run --config configs/default.toml
+cargo run --release -- run  --config configs/default.toml   # Theory 1: what the limits cost
+cargo run --release -- nest --config configs/nesting.toml   # Theory 2: how deep a chain gets
 ```
 
-The full experiment takes about 11 seconds on an M1 Air. `configs/quick.toml`
+The `run` experiment takes about 11 seconds on an M1 Air; `nest` takes under a
+second. `configs/quick.toml`
 is a much smaller world for iterating on code — too short to draw conclusions
 from.
 
 ```sh
-cargo test                          # 73 tests, most of them on the physics
+cargo test                          # 108 tests, most of them on the physics
 cargo run --release -- --help
 ```
 
@@ -108,6 +110,65 @@ a lie, and claiming the larger one would hide what the optimization is for.
 
 Full output lands in `out/runs.csv` and `out/report.json`.
 
+## v0.2: nesting and degradation
+
+Theory 2 says a universe can host a child, but only on a fraction of its own
+resources — so the chain degrades and has a maximum depth. Reproduce with:
+
+```sh
+cargo run --release -- nest --config configs/nesting.toml
+```
+
+```
+root budget 6630400 work units, each child gets 25% of its host
+
+depth        world       budget          spent      used      churn     state
+    1      128x128      6630400        6630400    100.0%    0.10835      live
+    2        64x64      1657600        1657600    100.0%    0.01018      live
+    3        21x21       414400         414400    100.0%    0.00659      live
+
+the chain terminated at depth 3; the closed form allowed at most 4
+every layer stayed inside the budget its host gave it
+total cost 8702400 against a geometric bound of 8840533
+```
+
+The root is given exactly what its own world costs, so nothing about the depth
+is chosen — it falls out of the rule.
+
+**The chain is finite, and cheap.** Budgets form a geometric series, so however
+deep a chain runs it costs the host less than `1 / (1 - fraction)` times the
+root layer alone — here 1.33×. Nesting is bounded in total spend, not just in
+depth, which is the more interesting half: a parent can host a whole chain
+without the chain eventually costing more than the parent.
+
+**It died of space, not of money.** The closed form allowed four layers; the
+chain stopped at three, because the fourth world would have been smaller than
+one block. Two termination conditions exist and the spatial one bit first.
+
+**Degradation is visible as declining activity.** Churn — mean tick-to-tick
+change in the macro field — falls by an order of magnitude per layer. It is
+worth noting this runs *against* the measurement's own bias: churn is taken on
+a fixed 16×16 macro grid, so a smaller world averages over fewer cells and
+should look noisier, not calmer. The decline is real, and if anything
+understated.
+
+**Cost is not monotonic in world size.** A 48×48 layer costs 3,686,400 while a
+64×64 one costs 1,657,600. Lazy rendering charges by the block, and the probe
+is rescaled with the world, so a probe landing on block boundaries resolves far
+fewer blocks than one of the same area straddling them. Sizing a layer is
+therefore a scan, not algebra — walking down from an area estimate would step
+straight past larger worlds that also fit.
+
+**Integer truncation costs the chain depth.** Budgets are integers and each
+generation is floored, so real chains come up short of the ideal geometric
+prediction — with `fraction = 0.75` and a root of 1000 against a viable minimum
+of 100, the closed form says 9 and the chain that builds is 8. `max_depth` is
+an upper bound, not an equality, and is documented as one.
+
+**What this does not model.** Layers cannot reach each other. The one-way
+serializing channel between them is v0.3, so the mutual blindness here is an
+omission rather than a claim.
+
 ## Theory → module map
 
 Each module's docs state which theory it implements and what would falsify it
@@ -121,6 +182,8 @@ Each module's docs state which theory it implements and what would falsify it
 | `observer` | Probes; the render and collapse events | 1 |
 | `rng` | The creator's runtime input channel | 9 |
 | `experiment` | The ON/OFF benchmark and its control | 1 |
+| `budget` | The degradation rule; what a layer may spend | 2 |
+| `layer` | Nesting: layers hosting layers, each poorer than its host | 2 |
 | `report` | CSV, JSON, and a summary that declines to overstate the result | 4 |
 
 The macro grid that `report` compares runs on is the **logging threshold** from
@@ -180,17 +243,17 @@ looked at).
 
 ## Roadmap
 
-v0.1 is one layer and stops there. In order:
+Done: **v0.1** limits as optimizations, **v0.2** nesting and degradation.
 
-1. **Nesting** — layers hosting child layers, under the degradation rule (each
-   child gets a strict fraction of its parent's budget).
-2. **Pipe** — the one-way serializing channel between layers; whether timing
+Next, in order:
+
+1. **Pipe** — the one-way serializing channel between layers; whether timing
    and magnitude survive when content does not.
-3. **Detection** — agents inside a layer trying to determine, from within,
+2. **Detection** — agents inside a layer trying to determine, from within,
    whether they are running under limits.
-4. **Fine-tuning sweep** — how thin the band of complexity-producing constants
+3. **Fine-tuning sweep** — how thin the band of complexity-producing constants
    actually is.
-5. **Emergence** — bootloader life. The hardest and slowest; emergence cannot
+4. **Emergence** — bootloader life. The hardest and slowest; emergence cannot
    be scheduled.
 
 Also later, not scoped: a Python notebook shell for analysing experiment

@@ -60,7 +60,15 @@ This cuts against the intuition that a simulation chain could be infinite. It
 also means that if we are simulated, we are not simulated *cheaply* — we are
 near enough to the top of a chain to still afford complexity.
 
-**In the code:** v0.2 milestone. Nothing implements this yet.
+**In the code:** `budget` (the degradation rule and the closed-form depth
+bound) and `layer` (the containment relation, and sizing each world to its
+budget). Run it with `the-universe nest`.
+
+**What would falsify it within the model:** a chain that runs deeper than the
+closed form allows, a layer that outspends its host, or a total cost that fails
+to converge. All three are checked. What actually happened is in the README:
+the chain is finite and costs less than 1.33x its root layer, and it died of
+the spatial floor before it ran out of money.
 
 ---
 
@@ -80,7 +88,7 @@ What might survive serialization is not content but *timing and magnitude*: how
 much went in, and when. A parent reading the far end of the pipe would receive
 something closer to a log line than a message.
 
-**In the code:** v0.2 milestone.
+**In the code:** v0.3 milestone.
 
 ---
 

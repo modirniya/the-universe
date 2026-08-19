@@ -3,6 +3,7 @@
 //! A config plus a seed fully determines a universe. If that stops being true,
 //! the project's central engineering rule has been broken.
 
+use crate::budget::Degradation;
 use crate::constraints::{Constraints, Params};
 use crate::observer::Probe;
 use crate::physics::Rules;
@@ -22,6 +23,9 @@ pub struct Config {
     pub observer: Probe,
     #[serde(default)]
     pub report: ReportCfg,
+    /// Theory 2. Only read by the `nest` command.
+    #[serde(default)]
+    pub nesting: Degradation,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize)]
@@ -134,6 +138,9 @@ impl Config {
         }
         if self.observer.x >= self.world.width || self.observer.y >= self.world.height {
             return bad("observer origin lies outside the world".into());
+        }
+        if let Err(m) = self.nesting.validate() {
+            return bad(m);
         }
         Ok(())
     }

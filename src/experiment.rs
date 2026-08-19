@@ -239,6 +239,7 @@ fn ratio(a: f64, b: f64) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::budget::Degradation;
     use crate::config::{Config, ReportCfg, WorldCfg};
     use crate::constraints::Params;
     use crate::observer::Probe;
@@ -266,6 +267,7 @@ mod tests {
                 macro_grid: 8,
                 out_dir: "out".into(),
             },
+            nesting: Degradation::default(),
         }
     }
 

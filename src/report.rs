@@ -12,6 +12,7 @@
 //! code that produces it.
 
 use crate::experiment::{Comparison, Experiment};
+use crate::layer::Chain;
 use std::fmt::Write as _;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -279,9 +280,214 @@ fn verdict(exp: &Experiment) -> String {
     s
 }
 
+// ---------------------------------------------------------------------------
+// Theory 2: nesting
+// ---------------------------------------------------------------------------
+
+/// Column order for `chain.csv`.
+const CHAIN_COLUMNS: &[&str] = &[
+    "depth",
+    "budget_work",
+    "width",
+    "height",
+    "ticks",
+    "cells",
+    "predicted_work",
+    "spent_work",
+    "budget_used",
+    "within_budget",
+    "final_live_fraction",
+    "churn",
+    "sterile",
+];
+
+pub fn chain_to_csv(chain: &Chain) -> String {
+    let mut s = CHAIN_COLUMNS.join(",");
+    s.push('\n');
+    for l in &chain.layers {
+        let _ = writeln!(
+            s,
+            "{},{},{},{},{},{},{},{},{:.6},{},{:.6},{:.6},{}",
+            l.layer.depth,
+            l.layer.budget.work,
+            l.layer.spec.width,
+            l.layer.spec.height,
+            l.layer.spec.ticks,
+            l.layer.spec.cells(),
+            l.layer.predicted_work,
+            l.work.neighbor_visits,
+            l.budget_used,
+            l.within_budget,
+            l.final_live_fraction,
+            l.churn,
+            l.sterile,
+        );
+    }
+    s
+}
+
+pub fn chain_to_json(chain: &Chain) -> String {
+    let mut s = String::from("{\n");
+    let _ = writeln!(
+        s,
+        "  \"root_budget\": {}, \"fraction\": {:.6}, \"viable_work\": {}, \"viable_edge\": {},",
+        chain.root_budget.work,
+        chain.degradation.fraction,
+        chain.degradation.viable_work,
+        chain.degradation.viable_edge
+    );
+    let _ = writeln!(
+        s,
+        "  \"predicted_max_depth\": {}, \"built_depth\": {}, \"productive_depth\": {},",
+        chain.predicted_max_depth,
+        chain.layers.len(),
+        chain.productive_depth()
+    );
+    let _ = writeln!(
+        s,
+        "  \"total_work\": {}, \"total_cost_bound\": {:.1},",
+        chain.total_work, chain.total_cost_bound
+    );
+    s.push_str("  \"layers\": [\n");
+    for (i, l) in chain.layers.iter().enumerate() {
+        let _ = write!(
+            s,
+            "    {{\"depth\": {}, \"budget_work\": {}, \"width\": {}, \"height\": {}, \
+             \"cells\": {}, \"predicted_work\": {}, \"spent_work\": {}, \"budget_used\": {:.6}, \
+             \"within_budget\": {}, \"final_live_fraction\": {:.6}, \"churn\": {:.6}, \
+             \"sterile\": {}}}",
+            l.layer.depth,
+            l.layer.budget.work,
+            l.layer.spec.width,
+            l.layer.spec.height,
+            l.layer.spec.cells(),
+            l.layer.predicted_work,
+            l.work.neighbor_visits,
+            l.budget_used,
+            l.within_budget,
+            l.final_live_fraction,
+            l.churn,
+            l.sterile,
+        );
+        if i + 1 < chain.layers.len() {
+            s.push(',');
+        }
+        s.push('\n');
+    }
+    s.push_str("  ]\n}\n");
+    s
+}
+
+/// Files written by one chain run.
+pub fn write_chain(chain: &Chain, out_dir: &Path) -> io::Result<Written> {
+    std::fs::create_dir_all(out_dir)?;
+    let csv = out_dir.join("chain.csv");
+    let json = out_dir.join("chain.json");
+    std::fs::write(&csv, chain_to_csv(chain))?;
+    std::fs::write(&json, chain_to_json(chain))?;
+    Ok(Written { csv, json })
+}
+
+pub fn chain_summary(chain: &Chain) -> String {
+    let mut s = String::new();
+
+    let _ = writeln!(
+        s,
+        "root budget {} work units, each child gets {:.0}% of its host",
+        chain.root_budget.work,
+        chain.degradation.fraction * 100.0
+    );
+    let _ = writeln!(
+        s,
+        "layer 0 is this process; the universes below are layers 1 and down\n"
+    );
+
+    let _ = writeln!(
+        s,
+        "{:>5}  {:>11}  {:>11}  {:>13}  {:>8}  {:>9}  {:>8}",
+        "depth", "world", "budget", "spent", "used", "churn", "state"
+    );
+    let _ = writeln!(s, "{}", "-".repeat(78));
+    for l in &chain.layers {
+        let _ = writeln!(
+            s,
+            "{:>5}  {:>11}  {:>11}  {:>13}  {:>7.1}%  {:>9.5}  {:>8}",
+            l.layer.depth,
+            format!("{}x{}", l.layer.spec.width, l.layer.spec.height),
+            l.layer.budget.work,
+            l.work.neighbor_visits,
+            l.budget_used * 100.0,
+            l.churn,
+            if l.sterile { "sterile" } else { "live" },
+        );
+    }
+
+    s.push('\n');
+    s.push_str(&chain_verdict(chain));
+    s
+}
+
+fn chain_verdict(chain: &Chain) -> String {
+    let mut s = String::new();
+
+    if chain.layers.is_empty() {
+        s.push_str("the root budget could not run a universe at all; there is no chain.\n");
+        return s;
+    }
+
+    let built = chain.layers.len();
+    let _ = writeln!(
+        s,
+        "the chain terminated at depth {built}; the closed form allowed at most {}",
+        chain.predicted_max_depth
+    );
+
+    let over = chain.layers.iter().filter(|l| !l.within_budget).count();
+    if over == 0 {
+        let _ = writeln!(s, "every layer stayed inside the budget its host gave it");
+    } else {
+        let _ = writeln!(
+            s,
+            "WARNING: {over} layer(s) outspent their host -- the chain is incoherent"
+        );
+    }
+
+    let _ = writeln!(
+        s,
+        "total cost {} against a geometric bound of {:.0}: an arbitrarily deep chain \n\
+         still costs the host less than {:.2}x the root layer alone",
+        chain.total_work,
+        chain.total_cost_bound,
+        1.0 / (1.0 - chain.degradation.fraction),
+    );
+
+    let productive = chain.productive_depth();
+    let sterile = built - chain.layers.iter().filter(|l| !l.sterile).count();
+    if sterile == 0 {
+        let _ = writeln!(
+            s,
+            "every layer was still doing something at the end of its run"
+        );
+    } else {
+        let _ = writeln!(
+            s,
+            "{sterile} of {built} layers ran but produced nothing: degradation has a horizon \n\
+             at depth {productive}, past which a universe is affordable but sterile"
+        );
+    }
+
+    s.push_str(
+        "\nthis says nesting and degradation are coherent as a model. layers here cannot \n\
+         reach each other -- the pipe between them is v0.3, so their mutual blindness is \n\
+         an omission rather than a claim.\n",
+    );
+    s
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::budget::Degradation;
     use crate::config::{Config, ReportCfg, WorldCfg};
     use crate::constraints::{Constraints, Params};
     use crate::experiment::run_all;
@@ -310,6 +516,7 @@ mod tests {
                 macro_grid: 8,
                 out_dir: "out".into(),
             },
+            nesting: Degradation::default(),
         };
         run_all(&cfg, |_| {})
     }

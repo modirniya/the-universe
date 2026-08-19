@@ -66,8 +66,13 @@ jobs:
       - name: Run the documented experiment
         run: cargo run --release -- run --config configs/default.toml
 
+      - name: Run the documented nesting chain
+        run: cargo run --release -- nest --config configs/nesting.toml
+
       - name: Artifacts were written
-        run: test -s out/runs.csv && test -s out/report.json
+        run: |
+          test -s out/runs.csv && test -s out/report.json
+          test -s out/nesting/chain.csv && test -s out/nesting/chain.json
 
       - name: Constraints reduce work, and the control is non-degenerate
         run: |
@@ -103,6 +108,44 @@ jobs:
               print("\nFAILED:", *fail, sep="\n  ")
               sys.exit(1)
           print("\nthe README's reproducible claims hold")
+          PY
+
+      - name: Nesting invariants hold
+        run: |
+          python3 - <<'PY'
+          import csv, sys
+
+          rows = list(csv.DictReader(open("out/nesting/chain.csv")))
+          fail = []
+
+          if len(rows) < 3:
+              fail.append(f"expected at least 3 layers, got {len(rows)}")
+
+          for r in rows:
+              if r["within_budget"] != "true":
+                  fail.append(f"layer {r['depth']} outspent its host")
+              # predict_work is exact, not an estimate -- see layer.rs
+              if r["predicted_work"] != r["spent_work"]:
+                  fail.append(
+                      f"layer {r['depth']}: predicted {r['predicted_work']} "
+                      f"but spent {r['spent_work']}"
+                  )
+
+          for a, b in zip(rows, rows[1:]):
+              if int(b["budget_work"]) >= int(a["budget_work"]):
+                  fail.append(f"layer {b['depth']} was not poorer than layer {a['depth']}")
+              if int(b["height"]) > int(a["height"]):
+                  fail.append(f"layer {b['depth']} was larger than its host")
+
+          print(f"{len(rows)} layers checked")
+          for r in rows:
+              print(f"  depth {r['depth']}: {r['width']}x{r['height']}  "
+                    f"budget {r['budget_work']}  churn {float(r['churn']):.5f}")
+
+          if fail:
+              print("\nFAILED:", *fail, sep="\n  ")
+              sys.exit(1)
+          print("\nnesting invariants hold")
           PY
 
   macos:

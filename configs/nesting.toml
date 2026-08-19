@@ -1,0 +1,38 @@
+# Theory 2: nesting and degradation.
+#
+# The root universe is the same size as the v0.1 default. It is given exactly
+# what its own world costs, and every layer below gets a strict fraction of its
+# host -- so how deep the chain goes is derived, not chosen.
+
+[world]
+width = 128
+height = 128
+ticks = 200
+seed = 42
+init_density = 0.30
+
+[params]
+subdivision = 2
+substeps = 2
+capped_radius = 1
+uncapped_radius = 3
+block_size = 16
+
+[observer]
+x = 32
+y = 32
+width = 64
+height = 64
+
+[report]
+macro_grid = 16
+out_dir = "out/nesting"
+
+[nesting]
+# Each child runs on a quarter of its host's budget. A parent still has to run
+# itself, so this must be below 1 -- at 1 the host keeps nothing.
+fraction = 0.25
+# Below this many neighbour visits, a universe cannot run at all.
+viable_work = 100000
+# Below this edge length, a world is too small to be a world.
+viable_edge = 16

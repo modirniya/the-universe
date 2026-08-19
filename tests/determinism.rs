@@ -7,6 +7,7 @@
 //! Wall time is excluded throughout. It is a measurement, not a counter, and
 //! it is the one number in the output that is *supposed* to vary.
 
+use the_universe::budget::Degradation;
 use the_universe::config::{Config, ReportCfg, WorldCfg};
 use the_universe::constraints::{Constraints, Params};
 use the_universe::experiment::{run, run_all};
@@ -39,6 +40,7 @@ fn cfg(seed: u64) -> Config {
             macro_grid: 8,
             out_dir: "out".into(),
         },
+        nesting: Degradation::default(),
     }
 }
 

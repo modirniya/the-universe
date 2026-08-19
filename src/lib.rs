@@ -16,22 +16,31 @@
 //! with the limits in force and without them, and see whether the limits make
 //! it cheaper without changing what an outside observer could see.
 //!
+//! - [`budget`] — the degradation rule; what a layer may spend
 //! - [`constraints`] — the four limits, as toggles
 //! - [`space`] — discrete space, and two-fidelity storage
 //! - [`physics`] — the laws, as pure functions
 //! - [`observer`] — probes, and the render/collapse events
 //! - [`experiment`] — the benchmark that compares constrained to unconstrained
+//! - [`layer`] — nesting: layers hosting layers, each poorer than its host
 //! - [`report`] — CSV, JSON and a summary that declines to overstate the result
 //! - [`rng`] — the creator's input channel; the reason runs are reproducible
 //!
 //! # Layers
 //!
-//! Layer 0 is the host process. v0.1 builds a single layer and stops there;
-//! nesting, pipes, and everything that follows from them are v0.2 and later.
+//! Layer 0 is the host process; simulated universes are layers 1, 2, 3 …, each
+//! running on a strict fraction of its host's budget. v0.2 adds that
+//! containment relation and the finite depth that follows from it.
+//!
+//! Layers cannot reach each other. The one-way serializing channel between
+//! them — the pipe — is v0.3, so mutual blindness here is an omission rather
+//! than a claim.
 
+pub mod budget;
 pub mod config;
 pub mod constraints;
 pub mod experiment;
+pub mod layer;
 pub mod observer;
 pub mod physics;
 pub mod report;
