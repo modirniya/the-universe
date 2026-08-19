@@ -66,7 +66,6 @@ def fig_limits(out: Path, to: Path) -> bool:
         return False
     df = pd.read_csv(csv).set_index("label")
     order = [k for k in ["space", "time", "speed", "lazy", "all_on"] if k in df.index]
-    ref = df.loc["all_off"] if "all_off" in df.index else None
 
     fig, (a, b) = plt.subplots(1, 2, figsize=(11, 4))
 
