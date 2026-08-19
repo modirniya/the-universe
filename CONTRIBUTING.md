@@ -167,6 +167,12 @@ tracker — the model cannot settle that, which is itself one of its claims
 Issues are preferred, since the answer usually helps someone else too. For
 anything that does not belong in public: **modirniya@gmail.com**.
 
+The project has a [code of conduct](CODE_OF_CONDUCT.md), and conduct reports go
+to that same address. Worth being straight about the scale: "community leaders"
+in that document means one person with one inbox. Reports are read and
+acknowledged within a week by a single human, not a review body. If that ever
+stops being true, the document gets updated rather than quietly ignored.
+
 ## Licence
 
 By contributing, you agree that your contributions are dual licensed under
