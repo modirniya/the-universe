@@ -7,12 +7,12 @@
 
 use std::path::Path;
 
-use the_universe::bootloader::{self, MIN_LIFETIME};
-use the_universe::budget::Budget;
-use the_universe::config::Config;
-use the_universe::constraints::Constraints;
-use the_universe::layer::{self, LayerSpec};
-use the_universe::report;
+use universe_core::bootloader::{self, MIN_LIFETIME};
+use universe_core::budget::Budget;
+use universe_core::config::Config;
+use universe_core::constraints::Constraints;
+use universe_core::layer::{self, LayerSpec};
+use universe_core::report;
 
 fn cfg() -> Config {
     Config::load(Path::new("configs/boot.toml")).expect("shipped config must load")

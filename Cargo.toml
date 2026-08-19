@@ -1,13 +1,37 @@
-[package]
-name = "the-universe"
-version = "0.6.0"
+[workspace]
+members = ["crates/universe-web"]
+
+[workspace.package]
+version = "0.7.0"
 edition = "2024"
-description = "Executable philosophy: a runnable model of a simulation-hypothesis framework. Physical limits as resource optimizations."
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/modirniya/the-universe"
+
+# The core crate stays at the repository root rather than moving under
+# `crates/`. Tests and the CLI both resolve `configs/...` relative to the
+# package root, so relocating it would have changed how every documented
+# command is invoked -- and the split was supposed to leave native behaviour
+# exactly as it was.
+[package]
+name = "universe-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Executable philosophy: a runnable model of a simulation-hypothesis framework. Physical limits as resource optimizations."
 readme = "README.md"
 keywords = ["simulation", "cellular-automaton", "philosophy", "determinism"]
 categories = ["simulation"]
+
+[lib]
+name = "universe_core"
+path = "src/lib.rs"
+
+# The binary keeps its name. Every command in the README still reads
+# `the-universe run --config ...`.
+[[bin]]
+name = "the-universe"
+path = "src/main.rs"
 
 [dependencies]
 serde = { version = "1.0.229", features = ["derive"] }

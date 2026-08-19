@@ -6,10 +6,10 @@
 
 use std::path::Path;
 
-use the_universe::budget::Budget;
-use the_universe::config::Config;
-use the_universe::layer::{self, LayerSpec};
-use the_universe::report;
+use universe_core::budget::Budget;
+use universe_core::config::Config;
+use universe_core::layer::{self, LayerSpec};
+use universe_core::report;
 
 fn cfg() -> Config {
     // Used exactly as shipped. Shortening the run would be tempting for speed
@@ -105,7 +105,7 @@ fn a_chain_is_reproducible() {
 }
 
 #[test]
-fn a_different_seed_changes_the_universes_but_not_their_shape() {
+fn a_different_seed_changes_universe_cores_but_not_their_shape() {
     // Budgets and world sizes are derived from the config, so reseeding must
     // leave the chain's structure alone while changing what happens inside it.
     let c = cfg();

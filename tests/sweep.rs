@@ -2,9 +2,9 @@
 
 use std::path::Path;
 
-use the_universe::config::Config;
-use the_universe::report;
-use the_universe::sweep::{self, CONWAY_BIRTH_CENTRE, CONWAY_SURVIVE_CENTRE, TOLERANCE};
+use universe_core::config::Config;
+use universe_core::report;
+use universe_core::sweep::{self, CONWAY_BIRTH_CENTRE, CONWAY_SURVIVE_CENTRE, TOLERANCE};
 
 fn cfg() -> Config {
     Config::load(Path::new("configs/sweep.toml")).expect("shipped config must load")

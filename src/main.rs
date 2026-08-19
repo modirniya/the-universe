@@ -4,11 +4,11 @@
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use the_universe::bootloader;
-use the_universe::budget::Budget;
-use the_universe::config::Config;
-use the_universe::detector::{self, Gaze, Inhabitant};
-use the_universe::{experiment, layer, pipe, report, sweep};
+use universe_core::bootloader;
+use universe_core::budget::Budget;
+use universe_core::config::Config;
+use universe_core::detector::{self, Gaze, Inhabitant};
+use universe_core::{experiment, layer, pipe, report, sweep};
 
 const USAGE: &str = "\
 the-universe — a runnable model of a simulation-hypothesis framework

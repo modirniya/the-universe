@@ -1,3 +1,7 @@
 /target
 /out
 .DS_Store
+/dist
+/web/pkg
+__pycache__/
+.ipynb_checkpoints/

@@ -7,9 +7,9 @@
 
 use std::path::Path;
 
-use the_universe::config::Config;
-use the_universe::pipe::{self, Relay};
-use the_universe::report;
+use universe_core::config::Config;
+use universe_core::pipe::{self, Relay};
+use universe_core::report;
 
 fn cfg() -> Config {
     Config::load(Path::new("configs/pipe.toml")).expect("shipped config must load")

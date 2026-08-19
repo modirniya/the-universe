@@ -7,13 +7,13 @@
 //! Wall time is excluded throughout. It is a measurement, not a counter, and
 //! it is the one number in the output that is *supposed* to vary.
 
-use the_universe::budget::Degradation;
-use the_universe::config::{Config, ReportCfg, WorldCfg};
-use the_universe::constraints::{Constraints, Params};
-use the_universe::experiment::{run, run_all};
-use the_universe::observer::Probe;
-use the_universe::physics::Rules;
-use the_universe::report;
+use universe_core::budget::Degradation;
+use universe_core::config::{Config, ReportCfg, WorldCfg};
+use universe_core::constraints::{Constraints, Params};
+use universe_core::experiment::{run, run_all};
+use universe_core::observer::Probe;
+use universe_core::physics::Rules;
+use universe_core::report;
 
 fn cfg(seed: u64) -> Config {
     Config {
@@ -41,7 +41,7 @@ fn cfg(seed: u64) -> Config {
             out_dir: "out".into(),
         },
         nesting: Degradation::default(),
-        horizon: the_universe::pipe::Horizon::default(),
+        horizon: universe_core::pipe::Horizon::default(),
     }
 }
 

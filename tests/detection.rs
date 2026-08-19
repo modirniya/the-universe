@@ -8,10 +8,10 @@
 
 use std::path::Path;
 
-use the_universe::config::Config;
-use the_universe::constraints::Constraints;
-use the_universe::detector::{self, Gaze, Inhabitant};
-use the_universe::report;
+use universe_core::config::Config;
+use universe_core::constraints::Constraints;
+use universe_core::detector::{self, Gaze, Inhabitant};
+use universe_core::report;
 
 fn cfg() -> Config {
     Config::load(Path::new("configs/detect.toml")).expect("shipped config must load")
