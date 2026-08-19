@@ -248,6 +248,36 @@ impl World {
             + self.coarse.len() * size_of::<f64>()
             + self.resolved.len() * size_of::<bool>()
     }
+
+    /// The entire state reduced to one number.
+    ///
+    /// Every field is folded in, densities by their exact bit pattern rather
+    /// than by any rounded decimal, so two worlds agreeing here agree
+    /// completely. Folding uses this crate's own generator rather than a
+    /// standard-library hasher, for the same reason the generator is
+    /// hand-written at all: `DefaultHasher` makes no promise of stability
+    /// across versions or platforms, and this number's whole job is to be
+    /// compared across platforms.
+    pub fn fingerprint(&self) -> u64 {
+        let mut acc = Rng::derive(
+            0x554E_4956_4552_5345,
+            self.geom.w as u64,
+            self.geom.h as u64,
+            self.geom.block as u64,
+        );
+        let mut h = acc.next_u64();
+        for (i, c) in self.cells.iter().enumerate() {
+            h = Rng::derive(h, *c as u64, i as u64, 1).next_u64();
+        }
+        for (i, d) in self.coarse.iter().enumerate() {
+            h = Rng::derive(h, d.to_bits(), i as u64, 2).next_u64();
+        }
+        for (i, r) in self.resolved.iter().enumerate() {
+            h = Rng::derive(h, u64::from(*r), i as u64, 3).next_u64();
+        }
+        acc = Rng::new(h);
+        acc.next_u64()
+    }
 }
 
 /// Mean absolute difference between two macro fields.

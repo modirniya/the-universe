@@ -30,6 +30,8 @@
 //!   seed they hand to the next layer
 //! - [`report`] — CSV, JSON and a summary that declines to overstate the result
 //! - [`rng`] — the creator's input channel; the reason runs are reproducible
+//! - [`golden`] — one fixed universe reduced to one number, so that
+//!   "same seed, same universe" can be checked across platforms
 //!
 //! # Layers
 //!
@@ -47,6 +49,7 @@ pub mod config;
 pub mod constraints;
 pub mod detector;
 pub mod experiment;
+pub mod golden;
 pub mod layer;
 pub mod observer;
 pub mod physics;
