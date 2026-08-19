@@ -11,6 +11,7 @@
 //! output format is part of the claim, so it is worth being able to read the
 //! code that produces it.
 
+use crate::bootloader::BootChain;
 use crate::detector::Finding;
 use crate::experiment::{Comparison, Experiment};
 use crate::layer::Chain;
@@ -1071,6 +1072,167 @@ fn sweep_verdict(sw: &Sweep) -> String {
          means settings that behave like the one setting already believed interesting. it is\n\
          a measure of resemblance, not of worth. two constants were swept out of the many a\n\
          universe has, and the widths of the bands were held fixed.\n",
+    );
+    s
+}
+
+// ---------------------------------------------------------------------------
+// Theory 5: bootloader life
+// ---------------------------------------------------------------------------
+
+const BOOT_COLUMNS: &[&str] = &[
+    "depth",
+    "width",
+    "height",
+    "budget_work",
+    "seed",
+    "tracks",
+    "bootloaders",
+    "transport",
+    "longest_lifetime",
+    "crossed",
+    "booted_child",
+];
+
+pub fn boot_to_csv(chain: &BootChain) -> String {
+    let mut s = BOOT_COLUMNS.join(",");
+    s.push('\n');
+    for l in &chain.layers {
+        let _ = writeln!(
+            s,
+            "{},{},{},{},{},{},{},{:.4},{},{},{}",
+            l.depth,
+            l.spec.width,
+            l.spec.height,
+            l.budget.work,
+            l.seed,
+            l.survey.tracks,
+            l.survey.bootloaders,
+            l.survey.transport,
+            l.survey.longest_lifetime,
+            l.crossed,
+            l.booted_child,
+        );
+    }
+    s
+}
+
+pub fn boot_to_json(chain: &BootChain) -> String {
+    let mut s = String::from("{\n");
+    let _ = writeln!(
+        s,
+        "  \"depth\": {}, \"ended_because\": \"{}\",",
+        chain.depth(),
+        chain.ended_because
+    );
+    s.push_str("  \"layers\": [\n");
+    for (i, l) in chain.layers.iter().enumerate() {
+        let _ = write!(
+            s,
+            "    {{\"depth\": {}, \"width\": {}, \"height\": {}, \"budget_work\": {}, \
+             \"seed\": {}, \"tracks\": {}, \"bootloaders\": {}, \"transport\": {:.4}, \
+             \"longest_lifetime\": {}, \"crossed\": {}, \"booted_child\": {}}}",
+            l.depth,
+            l.spec.width,
+            l.spec.height,
+            l.budget.work,
+            l.seed,
+            l.survey.tracks,
+            l.survey.bootloaders,
+            l.survey.transport,
+            l.survey.longest_lifetime,
+            l.crossed,
+            l.booted_child,
+        );
+        if i + 1 < chain.layers.len() {
+            s.push(',');
+        }
+        s.push('\n');
+    }
+    s.push_str("  ]\n}\n");
+    s
+}
+
+pub fn write_boot(chain: &BootChain, out_dir: &Path) -> io::Result<Written> {
+    std::fs::create_dir_all(out_dir)?;
+    let csv = out_dir.join("boot.csv");
+    let json = out_dir.join("boot.json");
+    std::fs::write(&csv, boot_to_csv(chain))?;
+    std::fs::write(&json, boot_to_json(chain))?;
+    Ok(Written { csv, json })
+}
+
+pub fn boot_summary(chain: &BootChain) -> String {
+    let mut s = String::new();
+
+    s.push_str(
+        "each layer is seeded by what crossed its parent's horizon: emergent structures\n\
+         drive the activity, the activity is what crosses, and what crosses is all the\n\
+         child ever receives\n\n",
+    );
+
+    let _ = writeln!(
+        s,
+        "{:>5}  {:>11}  {:>13}  {:>7}  {:>10}  {:>8}  {:>7}",
+        "depth", "world", "seed", "boots", "transport", "crossed", "child"
+    );
+    let _ = writeln!(s, "{}", "-".repeat(72));
+    for l in &chain.layers {
+        let _ = writeln!(
+            s,
+            "{:>5}  {:>11}  {:>13}  {:>7}  {:>10.1}  {:>8}  {:>7}",
+            l.depth,
+            format!("{}x{}", l.spec.width, l.spec.height),
+            l.seed % 1_000_000_000,
+            l.survey.bootloaders,
+            l.survey.transport,
+            l.crossed,
+            if l.booted_child { "yes" } else { "no" },
+        );
+    }
+
+    s.push('\n');
+    s.push_str(&boot_verdict(chain));
+    s
+}
+
+fn boot_verdict(chain: &BootChain) -> String {
+    let mut s = String::new();
+
+    if chain.layers.is_empty() {
+        s.push_str("no layer could be built at all.\n");
+        return s;
+    }
+
+    let _ = writeln!(
+        s,
+        "the chain reached depth {} and stopped: {}",
+        chain.depth(),
+        chain.ended_because
+    );
+
+    let sterile = chain.layers.iter().filter(|l| !l.survey.can_boot()).count();
+    if sterile > 0 {
+        let _ = writeln!(
+            s,
+            "{sterile} of {} layers produced no bootloader at all",
+            chain.depth()
+        );
+    }
+
+    let total: usize = chain.layers.iter().map(|l| l.survey.bootloaders).sum();
+    let _ = writeln!(
+        s,
+        "{total} bootloading structures across the chain, carrying {:.0} cells of transport",
+        chain.layers.iter().map(|l| l.survey.transport).sum::<f64>()
+    );
+
+    s.push_str(
+        "\na bootloader here is a pattern that persists, stays localized, and travels --\n\
+         structure moved to somewhere it was not. that is the precondition for booting\n\
+         anything, not the achievement itself. nothing in this model builds a computer;\n\
+         it shows that the transport such a thing would require is available, and that a\n\
+         layer without it has no way to seed the next one.\n",
     );
     s
 }

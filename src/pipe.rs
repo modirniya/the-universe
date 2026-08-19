@@ -72,6 +72,15 @@ pub struct Horizon {
     pub y: usize,
     pub width: usize,
     pub height: usize,
+    /// The logging threshold: magnitude below which nothing registers on the
+    /// far side. Used by the boot chain to decide whether a parent noticed its
+    /// child's existence at all.
+    #[serde(default = "default_threshold")]
+    pub threshold: f64,
+}
+
+fn default_threshold() -> f64 {
+    0.05
 }
 
 impl Default for Horizon {
@@ -84,6 +93,7 @@ impl Default for Horizon {
             y: 16,
             width: 32,
             height: 32,
+            threshold: default_threshold(),
         }
     }
 }
@@ -423,6 +433,7 @@ mod tests {
             y: 8,
             width: 16,
             height: 16,
+            threshold: default_threshold(),
         }
     }
 
@@ -456,6 +467,7 @@ mod tests {
             y: 0,
             width: 8,
             height: 8,
+            threshold: default_threshold(),
         };
         for y in 0..8 {
             for x in 0..8 {
@@ -484,6 +496,7 @@ mod tests {
             y: 0,
             width: 8,
             height: 8,
+            threshold: default_threshold(),
         };
         for y in 0..8 {
             for x in 0..8 {
@@ -625,6 +638,7 @@ mod tests {
             y: 60,
             width: 8,
             height: 8,
+            threshold: default_threshold(),
         };
         let m = serialize(&w, &seam, 0);
         assert!((0.0..=1.0).contains(&m.magnitude));

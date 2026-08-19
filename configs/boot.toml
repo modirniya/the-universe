@@ -1,0 +1,46 @@
+# Theory 5: bootloader life, and the loop the whole framework describes.
+#
+# Every layer is seeded by what crossed its parent's horizon. Emergent
+# structures drive the activity, the activity is what crosses, and what crosses
+# is all the child ever receives. Neither end can see through the pipe, and the
+# child is booted anyway.
+#
+# The chain can end for want of budget or for want of anything alive enough to
+# boot with. Which comes first is not decided here.
+
+[world]
+width = 128
+height = 128
+ticks = 200
+seed = 42
+init_density = 0.30
+
+[params]
+subdivision = 2
+substeps = 2
+capped_radius = 1
+uncapped_radius = 3
+block_size = 16
+
+[observer]
+x = 16
+y = 16
+width = 96
+height = 96
+
+[horizon]
+x = 32
+y = 32
+width = 48
+height = 48
+# Below this magnitude a parent notices nothing at all.
+threshold = 0.05
+
+[nesting]
+fraction = 0.25
+viable_work = 100000
+viable_edge = 16
+
+[report]
+macro_grid = 16
+out_dir = "out/boot"

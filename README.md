@@ -37,6 +37,7 @@ cargo run --release -- nest --config configs/nesting.toml   # Theory 2: how deep
 cargo run --release -- pipe --config configs/pipe.toml      # Theory 3: what survives the crossing
 cargo run --release -- detect --config configs/detect.toml  # Detection: which limits are findable
 cargo run --release -- sweep  --config configs/sweep.toml   # Theory 6: how narrow the band is
+cargo run --release -- boot   --config configs/boot.toml    # Theory 5: a chain booted from inside
 ```
 
 The `run` experiment takes about 11 seconds on an M1 Air; `nest` and `pipe`
@@ -45,7 +46,7 @@ is a much smaller world for iterating on code — too short to draw conclusions
 from.
 
 ```sh
-cargo test                          # 184 tests, most of them on the physics
+cargo test                          # 205 tests, most of them on the physics
 cargo run --release -- --help
 ```
 
@@ -341,6 +342,62 @@ means *resembling the one setting already believed interesting*. It is a measure
 of resemblance, not of worth. Two constants were swept out of the many a
 universe has, and the band widths were held fixed.
 
+## v0.6: bootloader life, and the loop closed
+
+Theory 5 is the framework's least sentimental claim: life's structural function
+in the chain is not to persist or to understand, but to be the mechanism by
+which a layer instantiates the layer below it.
+
+Full artificial life is out of reach, and pretending otherwise would be the
+dishonest version of this milestone. What is in reach is the thing a bootloader
+has to be able to do first — **move computation somewhere it was not**. A
+pattern that persists, stays localized, and travels is transporting structure
+rather than merely existing. Conway's glider is the canonical case, and the
+detector is checked against one.
+
+```sh
+cargo run --release -- boot --config configs/boot.toml
+```
+
+```
+depth        world           seed    boots   transport   crossed    child
+    1      128x128             42      128      2428.9       200      yes
+    2        55x55      120159306       32       703.4       187      yes
+    3        24x24      937860900        6        84.7       104      yes
+```
+
+**Every layer is seeded by what crossed its parent's horizon.** This is the
+whole framework closed into a loop, and it uses every part of it: emergent
+structures (Theory 5) drive the activity, the activity is what crosses the pipe
+(Theory 3), what crosses is all the child ever receives (Theory 4), and the
+child's budget is a fraction of its parent's (Theory 2), running under the
+optimizations of Theory 1. Neither end can see through the pipe, and the child
+is booted anyway.
+
+**Poorer layers produce less life.** Bootloaders fall 128 → 32 → 6 as the
+layers shrink. Degradation is not only a budget story; it thins out what a
+universe can grow.
+
+**A chain can die of sterility rather than poverty.** With a permissive floor on
+size and budget, the chain runs one layer further and stops at a 6×6 universe
+that produces nothing which travels — with money still in hand:
+
+```
+    4        12x12      491151905        1         9.4         8      yes
+    5          6x6      840514155        0         0.0         4       no
+
+stopped: the layer produced no bootloader, so there was nothing to boot with
+```
+
+That gives Theory 5 a limit on depth entirely its own, independent of the
+budget limit in v0.2. A chain ends for whichever reason arrives first, and which
+one that is depends on the settings rather than being decided in advance.
+
+**What this is not.** A bootloader here is a precondition, not an achievement.
+Nothing in this model builds a computer. It shows that the transport such a
+thing would require is available, and that a layer without it has no way to seed
+the next one.
+
 ## Theory → module map
 
 Each module's docs state which theory it implements and what would falsify it
@@ -359,6 +416,7 @@ Each module's docs state which theory it implements and what would falsify it
 | `pipe` | The one-way serializing channel; the horizon and the logging threshold | 3, 4 |
 | `detector` | Whether an inhabitant can find the limits from inside | 1, 4 |
 | `sweep` | Fine-tuning: how narrow the productive band of constants is | 6 |
+| `bootloader` | Structures that transport computation; the seed handed down | 5 |
 | `report` | CSV, JSON, and a summary that declines to overstate the result | 4 |
 
 The macro grid that `report` compares runs on is the **logging threshold** from
@@ -418,13 +476,19 @@ looked at).
 
 ## Roadmap
 
-Done: **v0.1** limits as optimizations, **v0.2** nesting and degradation,
-**v0.3** the pipe, **v0.4** detection, **v0.5** the fine-tuning sweep.
+Every milestone on the original roadmap is done:
 
-Next:
+**v0.1** limits as optimizations · **v0.2** nesting and degradation ·
+**v0.3** the pipe · **v0.4** detection · **v0.5** the fine-tuning sweep ·
+**v0.6** bootloader life
 
-1. **Emergence** — bootloader life. The hardest and slowest; emergence cannot
-   be scheduled.
+The six theories in [`docs/philosophy.md`](docs/philosophy.md) each have a
+module that implements them and a command that tests them, and v0.6 closes the
+loop by using all six at once.
+
+Beyond the roadmap, unscheduled: a Python notebook shell for analysing the CSV
+and JSON output, visuals, and a WASM build so strangers can run a universe in a
+browser tab.
 
 Also later, not scoped: a Python notebook shell for analysing experiment
 output, visuals, and a WASM build so strangers can run a universe in a browser

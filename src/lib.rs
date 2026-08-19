@@ -26,6 +26,8 @@
 //! - [`pipe`] — the one-way serializing channel between layers
 //! - [`detector`] — whether an inhabitant can find the limits from inside
 //! - [`sweep`] — fine-tuning: how narrow the productive band of constants is
+//! - [`bootloader`] — emergent structures that transport computation, and the
+//!   seed they hand to the next layer
 //! - [`report`] — CSV, JSON and a summary that declines to overstate the result
 //! - [`rng`] — the creator's input channel; the reason runs are reproducible
 //!
@@ -39,6 +41,7 @@
 //! them — the pipe — is v0.3, so mutual blindness here is an omission rather
 //! than a claim.
 
+pub mod bootloader;
 pub mod budget;
 pub mod config;
 pub mod constraints;

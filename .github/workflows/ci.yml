@@ -78,6 +78,9 @@ jobs:
       - name: Run the documented fine-tuning sweep
         run: cargo run --release -- sweep --config configs/sweep.toml --steps 11
 
+      - name: Run the documented boot chain
+        run: cargo run --release -- boot --config configs/boot.toml
+
       - name: Artifacts were written
         run: |
           test -s out/runs.csv && test -s out/report.json
@@ -85,6 +88,7 @@ jobs:
           test -s out/pipe/pipe.csv && test -s out/pipe/pipe.json
           test -s out/detect/detection.csv && test -s out/detect/detection.json
           test -s out/sweep/sweep.csv && test -s out/sweep/sweep.json
+          test -s out/boot/boot.csv && test -s out/boot/boot.json
 
       - name: Constraints reduce work, and the control is non-degenerate
         run: |
@@ -281,6 +285,50 @@ jobs:
               print("\nFAILED:", *fail, sep="\n  ")
               sys.exit(1)
           print("\nfine-tuning claims hold")
+          PY
+
+      - name: Bootloader claims hold
+        run: |
+          python3 - <<'PY'
+          import json, sys
+
+          d = json.load(open("out/boot/boot.json"))
+          layers = d["layers"]
+          fail = []
+
+          if d["depth"] < 2:
+              fail.append(f"the chain reached only depth {d['depth']}")
+
+          root = layers[0]
+          if root["bootloaders"] < 1:
+              fail.append("the root universe produced no bootloader")
+          if not root["booted_child"]:
+              fail.append("the root should have seeded a child")
+
+          # Every child is seeded by its parent, and no two share a seed.
+          seeds = [l["seed"] for l in layers]
+          if len(set(seeds)) != len(seeds):
+              fail.append("two layers shared a seed")
+
+          # Degradation thins out life as well as budget.
+          if layers[-1]["bootloaders"] > root["bootloaders"]:
+              fail.append("the deepest layer out-booted the first")
+
+          # Rust folds float sums from -0.0; a report must not print it.
+          for l in layers:
+              if str(l["transport"]).startswith("-"):
+                  fail.append(f"layer {l['depth']} reported negative transport")
+
+          for l in layers:
+              print(f"  depth {l['depth']}: {l['width']}x{l['height']}  "
+                    f"boots {l['bootloaders']:>4}  transport {l['transport']:>9.1f}  "
+                    f"child {l['booted_child']}")
+          print(f"ended: {d['ended_because']}")
+
+          if fail:
+              print("\nFAILED:", *fail, sep="\n  ")
+              sys.exit(1)
+          print("\nbootloader claims hold")
           PY
 
   macos:

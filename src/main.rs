@@ -4,6 +4,7 @@
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
+use the_universe::bootloader;
 use the_universe::budget::Budget;
 use the_universe::config::Config;
 use the_universe::detector::{self, Gaze, Inhabitant};
@@ -18,6 +19,7 @@ USAGE:
     the-universe pipe --config <FILE> [OPTIONS]
     the-universe detect --config <FILE> [OPTIONS]
     the-universe sweep --config <FILE> [OPTIONS]
+    the-universe boot  --config <FILE> [OPTIONS]
 
 COMMANDS:
     run     Compare an unconstrained universe against one with each limit in
@@ -40,6 +42,11 @@ COMMANDS:
     sweep   Vary the rule's constants across a grid, score what each setting
             produces, and report what share of the space is worth inhabiting.
             (Theory 6: fine-tuning.)
+
+    boot    Build a chain in which every layer is seeded by what crossed its
+            parent's horizon, and report where the chain stops -- for want of
+            budget, or for want of anything alive enough to boot with.
+            (Theory 5: bootloader life.)
 
 OPTIONS:
     --config <FILE>   Universe definition (TOML). Required.
@@ -96,6 +103,8 @@ enum Command {
     Detect,
     /// Theory 6: how narrow the productive band of constants is.
     Sweep,
+    /// Theory 5: a chain booted from inside, layer by layer.
+    Boot,
 }
 
 /// `Ok(None)` means help was requested.
@@ -113,9 +122,10 @@ fn parse(argv: Vec<String>) -> Result<Option<Args>, String> {
         "pipe" => Command::Pipe,
         "detect" => Command::Detect,
         "sweep" => Command::Sweep,
+        "boot" => Command::Boot,
         other => {
             return Err(format!(
-                "unknown command `{other}`; the commands are `run`, `nest`, `pipe`, `detect` and `sweep`"
+                "unknown command `{other}`; the commands are `run`, `nest`, `pipe`, `detect`, `sweep` and `boot`"
             ));
         }
     };
@@ -158,8 +168,8 @@ fn parse(argv: Vec<String>) -> Result<Option<Args>, String> {
                 );
             }
             "--budget" => {
-                if command != Command::Nest {
-                    return Err("`--budget` applies to `nest`, not `run`".into());
+                if !matches!(command, Command::Nest | Command::Boot) {
+                    return Err("`--budget` applies to `nest` and `boot`, not `run`".into());
                 }
                 let v = value()?;
                 budget = Some(
@@ -210,7 +220,47 @@ fn execute(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
         Command::Pipe => execute_pipe(&cfg, &out_dir),
         Command::Detect => execute_detect(&cfg, &out_dir),
         Command::Sweep => execute_sweep(&cfg, &out_dir, args.steps),
+        Command::Boot => execute_boot(&cfg, &out_dir, args.budget),
     }
+}
+
+fn execute_boot(
+    cfg: &Config,
+    out_dir: &Path,
+    budget_override: Option<u64>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let root_spec = layer::LayerSpec {
+        width: cfg.world.width,
+        height: cfg.world.height,
+        ticks: cfg.world.ticks,
+    };
+    let root_budget = Budget::new(
+        budget_override.unwrap_or_else(|| layer::predict_work(&root_spec, &cfg.observer, cfg)),
+    );
+
+    println!(
+        "root universe: {}x{} base cells, {} ticks, seed {}",
+        cfg.world.width, cfg.world.height, cfg.world.ticks, cfg.world.seed
+    );
+    println!(
+        "horizon {}x{} at ({}, {}), logging threshold {:.2}\n",
+        cfg.horizon.width, cfg.horizon.height, cfg.horizon.x, cfg.horizon.y, cfg.horizon.threshold
+    );
+
+    let chain = bootloader::run_boot_chain(cfg, root_budget, &cfg.nesting, |depth, spec| {
+        println!("  layer {depth}: {}x{} ...", spec.width, spec.height);
+    });
+
+    println!();
+    print!("{}", report::boot_summary(&chain));
+
+    let written = report::write_boot(&chain, out_dir)?;
+    println!(
+        "\nwrote {} and {}",
+        written.csv.display(),
+        written.json.display()
+    );
+    Ok(())
 }
 
 fn execute_sweep(
@@ -426,6 +476,12 @@ mod tests {
     }
 
     #[test]
+    fn boot_is_a_command() {
+        let a = parse(argv("boot --config c.toml")).unwrap().unwrap();
+        assert_eq!(a.command, Command::Boot);
+    }
+
+    #[test]
     fn sweep_is_a_command() {
         let a = parse(argv("sweep --config c.toml --steps 9"))
             .unwrap()
@@ -466,6 +522,7 @@ mod tests {
         assert_eq!(a.budget, Some(5000));
         let e = parse(argv("run --config c.toml --budget 5000")).unwrap_err();
         assert!(e.contains("applies to `nest`"), "{e}");
+        assert!(parse(argv("boot --config c.toml --budget 5000")).is_ok());
     }
 
     #[test]

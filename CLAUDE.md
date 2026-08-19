@@ -19,7 +19,8 @@ cargo run --release -- nest --config configs/nesting.toml  # Theory 2 chain, <1s
 cargo run --release -- pipe --config configs/pipe.toml     # Theory 3 relay, <1s
 cargo run --release -- detect --config configs/detect.toml # Detection survey, ~10s
 cargo run --release -- sweep  --config configs/sweep.toml  # Theory 6 sweep, ~6s at 21 steps
-cargo test                                                 # 184 tests
+cargo run --release -- boot   --config configs/boot.toml   # Theory 5 boot chain, ~5s
+cargo test                                                 # 205 tests
 cargo test physics::                                       # one module
 cargo test blinker_oscillates_with_period_two              # one test by name
 cargo test --test determinism                              # the same-seed-same-universe suite
@@ -27,6 +28,7 @@ cargo test --test nesting                                  # Theory 2 end to end
 cargo test --test pipe                                     # Theory 3 end to end
 cargo test --test detection                                # Detection end to end
 cargo test --test sweep                                    # Theory 6 end to end
+cargo test --test bootloader                               # Theory 5 end to end
 cargo test -- --nocapture                                  # see println! from tests
 cargo clippy --all-targets -- -D warnings                  # kept clean
 cargo fmt
@@ -59,6 +61,7 @@ Single crate. Module names match theory names — this is deliberate and load-be
 | `pipe` | Horizon, serialization, `WriteEnd`/`ReadEnd`, logging threshold |
 | `detector` | Inhabitant measurements; which limits are findable from inside |
 | `sweep` | Fine-tuning: scores each rule setting, counts distinct laws |
+| `bootloader` | Cluster tracking, bootloader detection, the boot chain |
 | `report` | CSV, JSON, printed summary and verdict |
 | `config` | TOML loading and validation |
 
@@ -105,6 +108,13 @@ From v0.2:
 - `Degradation::max_depth` is an **upper bound**, not an equality: integer flooring at each generation costs real chains depth.
 - A child with budget slack legitimately keeps its host's size — shrinkage is derived from scarcity, never imposed. Pinned by `a_child_with_slack_may_keep_its_hosts_size`.
 
+From v0.6:
+
+- The boot chain closes the loop: each layer is seeded from what crossed its parent's horizon, using all six theories at once.
+- **A chain can die of sterility rather than poverty** — Theory 5 supplies a depth limit independent of the budget. Which limit binds depends on the floors in `[nesting]`.
+- Poorer layers produce less life: bootloaders fall 128 → 32 → 6 down the chain.
+- Rust folds float sums from `-0.0` (the true additive identity), so an empty `sum::<f64>()` prints as `-0.0`. Normalise with `+ 0.0` before reporting.
+
 From v0.5:
 
 - 19% of reachable laws are productive: fine-tuning holds, but weakly.
@@ -136,9 +146,9 @@ From v0.3:
 
 ## Roadmap
 
-Done: v0.1 (limits as optimizations), v0.2 (nesting and degradation), v0.3 (the pipe), v0.4 (detection), v0.5 (fine-tuning sweep).
+**The original roadmap is complete**: v0.1 (limits as optimizations), v0.2 (nesting and degradation), v0.3 (the pipe), v0.4 (detection), v0.5 (fine-tuning sweep), v0.6 (bootloader life).
 
-Next: **emergence**. Also later: Python notebook shell for analysing output, visuals, WASM build.
+Unscheduled and still open: a Python notebook shell for analysing output, visuals, a WASM build. None of these are in the crate's scope as it stands; all three were named "later, not now" at the start and remain so unless Parham says otherwise. Also later: Python notebook shell for analysing output, visuals, WASM build.
 
 This order is firm. Finish a milestone before starting the next, and do not widen the current one to include the next even where they touch — layers currently cannot reach each other, and that omission belongs to the pipe milestone, not this one.
 

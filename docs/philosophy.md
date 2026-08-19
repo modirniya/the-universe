@@ -158,8 +158,23 @@ This reframes the search for purpose unsentimentally. The question is not
 whether life means anything, but what life *does* structurally, and what it
 does is boot the next BIOS.
 
-**In the code:** v0.2+ milestone, and the hardest one. Emergence cannot be
-scheduled.
+**In the code:** `bootloader`. A bootloader is detected as a pattern that
+persists, stays localized, and *travels* — structure moved to somewhere it was
+not, which is the transport any real bootloader would need first. Conway's
+glider is the canonical case and the detector is checked against one.
+`run_boot_chain` then closes the framework's loop: each layer is seeded from
+what crossed its parent's horizon, so the child is booted from inside the
+parent, through a channel neither end can see through.
+
+**What would falsify it within the model:** bootloaders appearing everywhere,
+which would make them unremarkable and disconnect this from Theory 6; or nowhere,
+which would mean the chain is inert by construction. Neither happened. What did
+happen is a second limit on depth: a chain can end because a layer is too small
+to grow anything that travels, with budget still in hand. Life gives out before
+money does, given a permissive enough floor.
+
+**What it is not.** Nothing here builds a computer. The model shows the
+precondition is available, not that the achievement follows.
 
 ---
 
