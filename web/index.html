@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>the-universe — watch it run</title>
+<meta name="description" content="A simulation-hypothesis framework you can watch. Toggle the limits a creator might have written and see what they cost.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,300..700;1,6..72,300..600&family=JetBrains+Mono:wght@400;500;700&display=swap">
+<link rel="stylesheet" href="./style.css">
+</head>
+<body>
+
+<div class="wrap">
+
+  <header class="masthead">
+    <p class="eyebrow">the-universe · v0.7 <span>executable philosophy</span></p>
+    <h1>A universe with its <em>optimizations</em> exposed</h1>
+    <p class="standfirst">
+      Physical limits, on this framework's reading, are not fundamental truths but
+      resource decisions — things a creator wrote to run a universe cheaply. Below is
+      one running. Turn its limits off and watch what they were buying.
+    </p>
+  </header>
+
+  <main class="stage">
+
+    <section class="viewport" aria-label="The universe">
+      <canvas id="world" width="768" height="768" aria-label="A cellular automaton with lazily rendered regions"></canvas>
+      <div class="legend">
+        <span><i class="sw sw-live"></i>a computed cell</span>
+        <span><i class="sw sw-coarse"></i>a region held as one density</span>
+        <span><i class="sw sw-probe"></i>the probe</span>
+        <span><i class="sw sw-render"></i>rendered</span>
+        <span><i class="sw sw-collapse"></i>collapsed</span>
+      </div>
+      <p class="shading-note">
+        Grainy ground is being computed cell by cell. Smooth ground is not being
+        computed at all — it is one number standing in for a whole region, and it
+        only becomes cells when the probe arrives.
+      </p>
+    </section>
+
+    <aside class="panel">
+
+      <div class="group">
+        <div class="transport">
+          <button id="play" class="primary" type="button">Play</button>
+          <button id="stepBtn" type="button">Step</button>
+          <button id="resetBtn" type="button">Reset</button>
+        </div>
+        <label class="slider">
+          <span>Ticks per second <b id="rateOut">20</b></span>
+          <input id="rate" type="range" min="1" max="60" value="20">
+        </label>
+      </div>
+
+      <div class="group">
+        <h2>The four limits</h2>
+        <p class="hint">Each is an optimization. Switch one off to buy a more expensive, more faithful universe.</p>
+        <label class="check"><input type="checkbox" id="lim-space" checked><span>Discrete space<em>pixelation instead of a continuum</em></span></label>
+        <label class="check"><input type="checkbox" id="lim-time" checked><span>Discrete time<em>one atomic update per tick</em></span></label>
+        <label class="check"><input type="checkbox" id="lim-speed" checked><span>Speed cap<em>a bound on how far influence reaches</em></span></label>
+        <label class="check"><input type="checkbox" id="lim-lazy" checked><span>Lazy rendering<em>full detail only where something looks</em></span></label>
+      </div>
+
+      <div class="group">
+        <h2>Two dials, one number</h2>
+        <p class="hint">
+          Both of these move the speed of influence, and it is their product. An
+          inhabitant measuring that speed cannot tell you which dial set it.
+        </p>
+        <label class="slider" id="substepsWrap">
+          <span>Substeps per tick <b id="substepsOut">2</b></span>
+          <input id="substeps" type="range" min="1" max="6" value="2">
+          <em class="moot" id="substepsMoot">pinned to 1 while discrete time is in force</em>
+        </label>
+        <label class="slider" id="radiusWrap">
+          <span>Uncapped radius <b id="radiusOut">3</b></span>
+          <input id="radius" type="range" min="1" max="6" value="3">
+          <em class="moot" id="radiusMoot">pinned to 1 while the speed cap is in force</em>
+        </label>
+        <div class="coupling">
+          <span>influence per tick</span>
+          <b id="coupling">1.00</b>
+          <em id="couplingWhy">radius 1 × substeps 1</em>
+        </div>
+      </div>
+
+      <div class="group">
+        <h2>The input event</h2>
+        <p class="hint">The seed is the creator's only necessary intervention. Same seed, same universe.</p>
+        <label class="field"><span>Seed</span><input id="seed" type="number" value="42" min="0" step="1"></label>
+        <label class="slider">
+          <span>Initial density <b id="densityOut">0.30</b></span>
+          <input id="density" type="range" min="5" max="60" value="30">
+        </label>
+      </div>
+
+      <div class="group">
+        <h2>Readouts</h2>
+        <dl class="readouts">
+          <div><dt>tick</dt><dd id="r-tick">0</dd></div>
+          <div><dt>occupancy</dt><dd id="r-live">0.000</dd></div>
+          <div><dt>neighbour visits / tick</dt><dd id="r-work">0</dd></div>
+          <div><dt>blocks computed</dt><dd id="r-blocks">0 / 0</dd></div>
+          <div><dt>state held</dt><dd id="r-live-bytes">0 B</dd></div>
+          <div><dt>actually allocated</dt><dd id="r-alloc-bytes">0 B</dd></div>
+        </dl>
+        <p class="hint">
+          Two memory figures, as on the command line: what a resource-honest
+          implementation would hold, and what this one really allocates. Reporting
+          only the first would be a lie; only the second would hide what the
+          optimization is for.
+        </p>
+      </div>
+
+      <div class="group" id="goldenGroup">
+        <h2>Same seed, same universe</h2>
+        <p class="hint">
+          A fixed reference universe, run for 64 ticks and reduced to one number.
+          Your browser computed the value on the left just now. The value on the
+          right was compiled in from the native build.
+        </p>
+        <div class="golden">
+          <div><dt>in this browser</dt><dd id="g-here">…</dd></div>
+          <div><dt>on the native build</dt><dd id="g-native">…</dd></div>
+        </div>
+        <p class="verdict" id="g-verdict">checking…</p>
+      </div>
+
+    </aside>
+  </main>
+
+  <footer>
+    <div class="framing">
+      <p>
+        <strong>What this shows:</strong> that these ideas are <em>coherent</em> — that
+        they can be made to work together in something that runs and produces
+        measurable results.
+      </p>
+      <p>
+        <strong>What it does not show:</strong> that our universe works this way. Every
+        number here is a fact about a program. Nothing on this page is evidence about
+        physics, and the model makes falsifiable predictions only about its own
+        behaviour.
+      </p>
+    </div>
+    <p class="colophon">
+      <a href="https://github.com/modirniya/the-universe">github.com/modirniya/the-universe</a>
+      · Parham Modirniya · MIT OR Apache-2.0
+    </p>
+  </footer>
+
+</div>
+
+<script type="module" src="./app.js"></script>
+</body>
+</html>
