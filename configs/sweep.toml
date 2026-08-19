@@ -1,0 +1,33 @@
+# Theory 6: fine-tuning.
+#
+# Every setting of the constants gets its own universe, so these are small and
+# short. The question is which rules produce anything, not how far any one of
+# them can run.
+#
+# Lazy rendering is forced off for the sweep: the question is what a rule does,
+# and coarse-graining most of the world would answer a different one.
+
+[world]
+width = 64
+height = 64
+ticks = 80
+seed = 42
+init_density = 0.30
+
+[params]
+subdivision = 2
+substeps = 2
+capped_radius = 1
+uncapped_radius = 3
+block_size = 16
+
+# The whole world is observed: nothing here is about observation.
+[observer]
+x = 0
+y = 0
+width = 64
+height = 64
+
+[report]
+macro_grid = 16
+out_dir = "out/sweep"

@@ -75,12 +75,16 @@ jobs:
       - name: Run the documented detection survey
         run: cargo run --release -- detect --config configs/detect.toml
 
+      - name: Run the documented fine-tuning sweep
+        run: cargo run --release -- sweep --config configs/sweep.toml --steps 11
+
       - name: Artifacts were written
         run: |
           test -s out/runs.csv && test -s out/report.json
           test -s out/nesting/chain.csv && test -s out/nesting/chain.json
           test -s out/pipe/pipe.csv && test -s out/pipe/pipe.json
           test -s out/detect/detection.csv && test -s out/detect/detection.json
+          test -s out/sweep/sweep.csv && test -s out/sweep/sweep.json
 
       - name: Constraints reduce work, and the control is non-degenerate
         run: |
@@ -241,6 +245,42 @@ jobs:
               print("\nFAILED:", *fail, sep="\n  ")
               sys.exit(1)
           print("\ndetection findings hold")
+          PY
+
+      - name: Fine-tuning claims hold
+        run: |
+          python3 - <<'PY'
+          import json, sys
+
+          d = json.load(open("out/sweep/sweep.json"))
+          fail = []
+
+          # If the reference fails its own calibration nothing else means anything.
+          if not d["reference_admitted"]:
+              fail.append("the reference setting failed the bar it set")
+
+          # Theory 6 needs the productive band to be a minority, and the count
+          # must be over distinct laws rather than grid area.
+          rf = d["productive_rule_fraction"]
+          if not 0.0 < rf < 0.5:
+              fail.append(f"productive rule fraction {rf:.3f} is outside (0, 0.5)")
+
+          if d["distinct_rules"] >= len(d["grid"]):
+              fail.append("the grid should collapse onto fewer distinct laws")
+
+          # Chaos must not be counted: nothing admitted may exceed the activity band.
+          for o in d["grid"]:
+              if o["complex"] and o["activity"] > d["bar"]["max_activity"]:
+                  fail.append(f"a chaotic setting was admitted: activity {o['activity']}")
+                  break
+
+          print(f"{d['distinct_complex']} of {d['distinct_rules']} distinct laws productive "
+                f"({rf*100:.1f}%), over {len(d['grid'])} settings")
+
+          if fail:
+              print("\nFAILED:", *fail, sep="\n  ")
+              sys.exit(1)
+          print("\nfine-tuning claims hold")
           PY
 
   macos:

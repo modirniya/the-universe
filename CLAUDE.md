@@ -18,13 +18,15 @@ cargo run --release -- run  --config configs/quick.toml    # small world for ite
 cargo run --release -- nest --config configs/nesting.toml  # Theory 2 chain, <1s
 cargo run --release -- pipe --config configs/pipe.toml     # Theory 3 relay, <1s
 cargo run --release -- detect --config configs/detect.toml # Detection survey, ~10s
-cargo test                                                 # 158 tests
+cargo run --release -- sweep  --config configs/sweep.toml  # Theory 6 sweep, ~6s at 21 steps
+cargo test                                                 # 184 tests
 cargo test physics::                                       # one module
 cargo test blinker_oscillates_with_period_two              # one test by name
 cargo test --test determinism                              # the same-seed-same-universe suite
 cargo test --test nesting                                  # Theory 2 end to end
 cargo test --test pipe                                     # Theory 3 end to end
 cargo test --test detection                                # Detection end to end
+cargo test --test sweep                                    # Theory 6 end to end
 cargo test -- --nocapture                                  # see println! from tests
 cargo clippy --all-targets -- -D warnings                  # kept clean
 cargo fmt
@@ -56,6 +58,7 @@ Single crate. Module names match theory names — this is deliberate and load-be
 | `layer` | Nesting: sizes each layer to its budget, runs the chain |
 | `pipe` | Horizon, serialization, `WriteEnd`/`ReadEnd`, logging threshold |
 | `detector` | Inhabitant measurements; which limits are findable from inside |
+| `sweep` | Fine-tuning: scores each rule setting, counts distinct laws |
 | `report` | CSV, JSON, printed summary and verdict |
 | `config` | TOML loading and validation |
 
@@ -102,6 +105,13 @@ From v0.2:
 - `Degradation::max_depth` is an **upper bound**, not an equality: integer flooring at each generation costs real chains depth.
 - A child with budget slack legitimately keeps its host's size — shrinkage is derived from scarcity, never imposed. Pinned by `a_child_with_slack_may_keep_its_hosts_size`.
 
+From v0.5:
+
+- 19% of reachable laws are productive: fine-tuning holds, but weakly.
+- **Complexity criteria must be bands, not floors.** An activity floor admitted chaotic rules churning at 20× Conway. Class 3 is not class 4.
+- **Count distinct laws, not grid area.** 441 settings denote 42 laws because only `k/8` densities occur. An area fraction reports the sweep's resolution, not the universe's. `sweep::rule_signature` canonicalises.
+- Raw macro variance nearly tracks density; normalise by the i.i.d. baseline `p(1-p)/cells_per_macro` before calling anything "structure".
+
 From v0.4:
 
 - Pixelation is undetectable from inside: the cell is the ruler.
@@ -126,9 +136,9 @@ From v0.3:
 
 ## Roadmap
 
-Done: v0.1 (limits as optimizations), v0.2 (nesting and degradation), v0.3 (the pipe), v0.4 (detection).
+Done: v0.1 (limits as optimizations), v0.2 (nesting and degradation), v0.3 (the pipe), v0.4 (detection), v0.5 (fine-tuning sweep).
 
-Next, in order: **fine-tuning sweep** → **emergence**. Also later: Python notebook shell for analysing output, visuals, WASM build.
+Next: **emergence**. Also later: Python notebook shell for analysing output, visuals, WASM build.
 
 This order is firm. Finish a milestone before starting the next, and do not widen the current one to include the next even where they touch — layers currently cannot reach each other, and that omission belongs to the pipe milestone, not this one.
 

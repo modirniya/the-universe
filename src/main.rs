@@ -7,7 +7,7 @@ use std::process::ExitCode;
 use the_universe::budget::Budget;
 use the_universe::config::Config;
 use the_universe::detector::{self, Gaze, Inhabitant};
-use the_universe::{experiment, layer, pipe, report};
+use the_universe::{experiment, layer, pipe, report, sweep};
 
 const USAGE: &str = "\
 the-universe — a runnable model of a simulation-hypothesis framework
@@ -17,6 +17,7 @@ USAGE:
     the-universe nest --config <FILE> [OPTIONS]
     the-universe pipe --config <FILE> [OPTIONS]
     the-universe detect --config <FILE> [OPTIONS]
+    the-universe sweep --config <FILE> [OPTIONS]
 
 COMMANDS:
     run     Compare an unconstrained universe against one with each limit in
@@ -36,6 +37,10 @@ COMMANDS:
             and report which of its limits leave a fingerprint an inhabitant
             could find. (Detection.)
 
+    sweep   Vary the rule's constants across a grid, score what each setting
+            produces, and report what share of the space is worth inhabiting.
+            (Theory 6: fine-tuning.)
+
 OPTIONS:
     --config <FILE>   Universe definition (TOML). Required.
     --out <DIR>       Where to write the report.
@@ -44,6 +49,7 @@ OPTIONS:
     --ticks <N>       Override world.ticks.
     --budget <N>      nest only: root layer's work budget, in neighbour
                       visits. Defaults to what the root world costs.
+    --steps <N>       sweep only: grid resolution per axis. Default 21.
     -h, --help        Print this.
 ";
 
@@ -75,6 +81,7 @@ struct Args {
     seed: Option<u64>,
     ticks: Option<u64>,
     budget: Option<u64>,
+    steps: Option<usize>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -87,6 +94,8 @@ enum Command {
     Pipe,
     /// Detection: which limits are findable from inside.
     Detect,
+    /// Theory 6: how narrow the productive band of constants is.
+    Sweep,
 }
 
 /// `Ok(None)` means help was requested.
@@ -103,9 +112,10 @@ fn parse(argv: Vec<String>) -> Result<Option<Args>, String> {
         "nest" => Command::Nest,
         "pipe" => Command::Pipe,
         "detect" => Command::Detect,
+        "sweep" => Command::Sweep,
         other => {
             return Err(format!(
-                "unknown command `{other}`; the commands are `run`, `nest`, `pipe` and `detect`"
+                "unknown command `{other}`; the commands are `run`, `nest`, `pipe`, `detect` and `sweep`"
             ));
         }
     };
@@ -115,6 +125,7 @@ fn parse(argv: Vec<String>) -> Result<Option<Args>, String> {
     let mut seed = None;
     let mut ticks = None;
     let mut budget = None;
+    let mut steps = None;
 
     while let Some(flag) = it.next() {
         let mut value = || it.next().ok_or_else(|| format!("`{flag}` needs a value"));
@@ -134,6 +145,16 @@ fn parse(argv: Vec<String>) -> Result<Option<Args>, String> {
                 ticks = Some(
                     v.parse()
                         .map_err(|_| format!("`--ticks {v}` is not a number"))?,
+                );
+            }
+            "--steps" => {
+                if command != Command::Sweep {
+                    return Err("`--steps` applies to `sweep`, not other commands".into());
+                }
+                let v = value()?;
+                steps = Some(
+                    v.parse::<usize>()
+                        .map_err(|_| format!("`--steps {v}` is not a number"))?,
                 );
             }
             "--budget" => {
@@ -164,6 +185,7 @@ fn parse(argv: Vec<String>) -> Result<Option<Args>, String> {
         seed,
         ticks,
         budget,
+        steps,
     }))
 }
 
@@ -187,7 +209,43 @@ fn execute(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
         Command::Nest => execute_nest(&cfg, &out_dir, args.budget),
         Command::Pipe => execute_pipe(&cfg, &out_dir),
         Command::Detect => execute_detect(&cfg, &out_dir),
+        Command::Sweep => execute_sweep(&cfg, &out_dir, args.steps),
     }
+}
+
+fn execute_sweep(
+    cfg: &Config,
+    out_dir: &Path,
+    steps: Option<usize>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let steps = steps.unwrap_or(21).max(2);
+    let (min, max) = (0.05, 0.65);
+
+    println!(
+        "each universe: {}x{} base cells, {} ticks, seed {}",
+        cfg.world.width, cfg.world.height, cfg.world.ticks, cfg.world.seed
+    );
+    println!(
+        "sweeping {} settings of the rule's constants\n",
+        steps * steps
+    );
+
+    let sw = sweep::run_sweep(cfg, steps, min, max, |done, total| {
+        if done % 4 == 0 || done == total {
+            println!("  row {done}/{total}");
+        }
+    });
+
+    println!();
+    print!("{}", report::sweep_summary(&sw));
+
+    let written = report::write_sweep(&sw, out_dir)?;
+    println!(
+        "\nwrote {} and {}",
+        written.csv.display(),
+        written.json.display()
+    );
+    Ok(())
 }
 
 fn execute_detect(cfg: &Config, out_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
@@ -365,6 +423,21 @@ mod tests {
     #[test]
     fn unknown_command_is_rejected() {
         assert!(parse(argv("simulate --config c.toml")).is_err());
+    }
+
+    #[test]
+    fn sweep_is_a_command() {
+        let a = parse(argv("sweep --config c.toml --steps 9"))
+            .unwrap()
+            .unwrap();
+        assert_eq!(a.command, Command::Sweep);
+        assert_eq!(a.steps, Some(9));
+    }
+
+    #[test]
+    fn steps_belongs_to_sweep_only() {
+        let e = parse(argv("run --config c.toml --steps 9")).unwrap_err();
+        assert!(e.contains("applies to `sweep`"), "{e}");
     }
 
     #[test]

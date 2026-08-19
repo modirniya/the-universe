@@ -15,6 +15,7 @@ use crate::detector::Finding;
 use crate::experiment::{Comparison, Experiment};
 use crate::layer::Chain;
 use crate::pipe::{self, Horizon, Relay};
+use crate::sweep::{self, Sweep};
 use std::fmt::Write as _;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -854,6 +855,222 @@ fn detect_verdict(findings: &[Finding]) -> String {
         "\nnone of this tells an inhabitant whether it is simulated. it tells it which of\n\
          its own laws have the shape of an optimization -- which is the most the model\n\
          allows anyone on the inside to know.\n",
+    );
+    s
+}
+
+// ---------------------------------------------------------------------------
+// Theory 6: fine-tuning
+// ---------------------------------------------------------------------------
+
+const SWEEP_COLUMNS: &[&str] = &[
+    "birth_centre",
+    "survive_centre",
+    "final_live",
+    "activity",
+    "dispersion",
+    "complex",
+];
+
+pub fn sweep_to_csv(sw: &Sweep) -> String {
+    let mut s = SWEEP_COLUMNS.join(",");
+    s.push('\n');
+    for o in &sw.grid {
+        let _ = writeln!(
+            s,
+            "{:.6},{:.6},{:.6},{:.8},{:.8},{}",
+            o.birth_centre, o.survive_centre, o.final_live, o.activity, o.dispersion, o.complex
+        );
+    }
+    s
+}
+
+pub fn sweep_to_json(sw: &Sweep) -> String {
+    let mut s = String::from("{\n");
+    let _ = writeln!(
+        s,
+        "  \"steps\": {}, \"min\": {:.6}, \"max\": {:.6},",
+        sw.steps, sw.min, sw.max
+    );
+    let _ = writeln!(
+        s,
+        "  \"bar\": {{\"min_activity\": {:.8}, \"max_activity\": {:.8}, \
+         \"min_dispersion\": {:.6}, \"max_dispersion\": {:.6}, \
+         \"min_live\": {:.6}, \"max_live\": {:.6}}},",
+        sw.bar.min_activity,
+        sw.bar.max_activity,
+        sw.bar.min_dispersion,
+        sw.bar.max_dispersion,
+        sw.bar.min_live,
+        sw.bar.max_live
+    );
+    let _ = writeln!(
+        s,
+        "  \"productive_fraction\": {:.6}, \"productive_rule_fraction\": {:.6}, \
+         \"distinct_rules\": {}, \"distinct_complex\": {}, \"reference_admitted\": {},",
+        sw.productive_fraction(),
+        sw.productive_rule_fraction(),
+        sw.distinct_rules(),
+        sw.distinct_complex(),
+        sw.reference_is_admitted()
+    );
+    s.push_str("  \"grid\": [\n");
+    for (i, o) in sw.grid.iter().enumerate() {
+        let _ = write!(
+            s,
+            "    {{\"birth_centre\": {:.6}, \"survive_centre\": {:.6}, \"final_live\": {:.6}, \
+             \"activity\": {:.8}, \"structure\": {:.8}, \"complex\": {}}}",
+            o.birth_centre, o.survive_centre, o.final_live, o.activity, o.dispersion, o.complex
+        );
+        if i + 1 < sw.grid.len() {
+            s.push(',');
+        }
+        s.push('\n');
+    }
+    s.push_str("  ]\n}\n");
+    s
+}
+
+pub fn write_sweep(sw: &Sweep, out_dir: &Path) -> io::Result<Written> {
+    std::fs::create_dir_all(out_dir)?;
+    let csv = out_dir.join("sweep.csv");
+    let json = out_dir.join("sweep.json");
+    std::fs::write(&csv, sweep_to_csv(sw))?;
+    std::fs::write(&json, sweep_to_json(sw))?;
+    Ok(Written { csv, json })
+}
+
+/// Which glyph a setting earns on the map.
+fn glyph(o: &sweep::Outcome, bar: &sweep::Bar) -> char {
+    if o.complex {
+        return '#';
+    }
+    if o.final_live <= 0.001 {
+        return ' '; // empty
+    }
+    if o.final_live >= 0.95 {
+        return '@'; // saturated
+    }
+    if o.activity < bar.min_activity * 0.1 {
+        return '.'; // alive but frozen
+    }
+    if o.activity > bar.max_activity {
+        return '~'; // churning too hard to be anything
+    }
+    ':' // in between, but not resembling the reference closely enough
+}
+
+pub fn sweep_summary(sw: &Sweep) -> String {
+    let mut s = String::new();
+
+    let _ = writeln!(
+        s,
+        "swept both band centres over [{:.2}, {:.2}] at {} steps: {} universes",
+        sw.min,
+        sw.max,
+        sw.steps,
+        sw.grid.len()
+    );
+    let _ = writeln!(
+        s,
+        "bar calibrated from Conway, every criterion a band: activity in [{:.5}, {:.5}],\n\
+         dispersion in [{:.3}, {:.3}], occupancy in [{:.3}, {:.2}]\n",
+        sw.bar.min_activity,
+        sw.bar.max_activity,
+        sw.bar.min_dispersion,
+        sw.bar.max_dispersion,
+        sw.bar.min_live,
+        sw.bar.max_live
+    );
+
+    // The map. Survive centre runs down, birth centre runs across.
+    s.push_str("  survive\n");
+    for row in 0..sw.steps {
+        let sc = sw.at(0, row).survive_centre;
+        let _ = write!(s, "  {sc:>6.3} |");
+        for col in 0..sw.steps {
+            s.push(glyph(sw.at(col, row), &sw.bar));
+        }
+        s.push('\n');
+    }
+    let _ = write!(s, "         +");
+    for _ in 0..sw.steps {
+        s.push('-');
+    }
+    let _ = writeln!(s, "\n          {:<width$}", "birth", width = sw.steps);
+    let _ = writeln!(
+        s,
+        "          {:.2}{:>width$.2}",
+        sw.min,
+        sw.max,
+        width = sw.steps.saturating_sub(4).max(1)
+    );
+
+    s.push_str("\n  # complex   : near   ~ chaotic   . frozen   @ saturated   (blank) empty\n\n");
+
+    s.push_str(&sweep_verdict(sw));
+    s
+}
+
+fn sweep_verdict(sw: &Sweep) -> String {
+    let mut s = String::new();
+    let f = sw.productive_rule_fraction();
+
+    if !sw.reference_is_admitted() {
+        s.push_str(
+            "WARNING: the reference setting failed the bar it set. the calibration is broken,\n\
+             and nothing below should be believed.\n\n",
+        );
+    }
+
+    let _ = writeln!(
+        s,
+        "{:.1}% of the swept area produced a complex universe ({} of {} settings)",
+        f * 100.0,
+        sw.grid.iter().filter(|o| o.complex).count(),
+        sw.grid.len()
+    );
+
+    // The area fraction flatters the sweep's resolution. Say the honest number.
+    let rf = sw.productive_rule_fraction();
+    let _ = writeln!(
+        s,
+        "but those {} settings denote only {} distinct laws, of which {} were productive:\n\
+         {:.1}% of the laws this sweep can actually reach",
+        sw.grid.len(),
+        sw.distinct_rules(),
+        sw.distinct_complex(),
+        rf * 100.0
+    );
+    let _ = writeln!(
+        s,
+        "a neighbourhood of eight cells only ever has densities k/8, so nudging a band\n\
+         centre usually changes nothing. area is the resolution of the sweep; laws are\n\
+         the resolution of the universe.\n"
+    );
+
+    if f < 0.15 {
+        s.push_str(
+            "the productive band is narrow. most settings of these constants give a universe\n\
+             that empties, saturates, or freezes, and the ones that do not sit close together.\n",
+        );
+    } else if f < 0.5 {
+        s.push_str(
+            "the productive band is a minority of the space but not a sliver. fine-tuning\n\
+             holds here in a weaker form than the argument usually assumes.\n",
+        );
+    } else {
+        s.push_str(
+            "most of the swept space is productive. within this model, on these constants,\n\
+             fine-tuning does not hold -- complexity is the common case, not the rare one.\n",
+        );
+    }
+
+    s.push_str(
+        "\nwhat this does not show: the bar is calibrated from Conway, so a productive band\n\
+         means settings that behave like the one setting already believed interesting. it is\n\
+         a measure of resemblance, not of worth. two constants were swept out of the many a\n\
+         universe has, and the widths of the bands were held fixed.\n",
     );
     s
 }

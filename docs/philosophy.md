@@ -177,8 +177,19 @@ The toy already exhibits a small version of this: the rule is stated as density
 bands, and moving those bands even slightly turns a world that produces
 structure into one that dies or saturates.
 
-**In the code:** v0.2+ milestone (constant sweeps). The rule bands in
-`physics::Rules` are the dial a sweep would turn.
+**In the code:** `sweep`. The rule's density bands are the constants, and both
+band centres are swept across a grid; each setting gets its own universe and is
+scored on whether it ends up neither empty nor saturated, still changing, and
+spatially structured.
+
+**What would falsify it within the model:** complexity turning out to be common.
+The fine-tuning claim needs the productive band to be narrow, and a sweep
+finding most laws productive would refute it. The measured answer is 19% of the
+distinct laws reachable — a minority, but not the sliver the argument usually
+assumes. Two cautions travel with that number: the bar is calibrated from Conway
+and so measures resemblance rather than worth, and the productive fraction must
+be counted over *distinct laws* rather than grid area, since a neighbourhood of
+eight cells only admits densities k/8 and 441 settings collapse onto 42 laws.
 
 ---
 

@@ -36,6 +36,7 @@ cargo run --release -- run  --config configs/default.toml   # Theory 1: what the
 cargo run --release -- nest --config configs/nesting.toml   # Theory 2: how deep a chain gets
 cargo run --release -- pipe --config configs/pipe.toml      # Theory 3: what survives the crossing
 cargo run --release -- detect --config configs/detect.toml  # Detection: which limits are findable
+cargo run --release -- sweep  --config configs/sweep.toml   # Theory 6: how narrow the band is
 ```
 
 The `run` experiment takes about 11 seconds on an M1 Air; `nest` and `pipe`
@@ -44,7 +45,7 @@ is a much smaller world for iterating on code — too short to draw conclusions
 from.
 
 ```sh
-cargo test                          # 158 tests, most of them on the physics
+cargo test                          # 184 tests, most of them on the physics
 cargo run --release -- --help
 ```
 
@@ -283,6 +284,63 @@ is a local observation and is reported as one.
 is simulated. It learns which of its own laws have the shape of an optimization,
 which is the most the model allows anyone on the inside to know.
 
+## v0.5: the fine-tuning sweep
+
+Theory 6 says only narrow bands of a universe's constants produce complexity.
+That is usually deployed as an argument for design; here it is something to
+measure. Sweep the rule's density bands, score what each setting produces, and
+report what share of the space is worth inhabiting.
+
+```sh
+cargo run --release -- sweep --config configs/sweep.toml --steps 21
+```
+
+```
+  survive
+   0.050 |~########............
+   0.140 |#::::####............
+   0.260 |:::::::::####........
+   0.320 |:::::::::####........
+   0.380 |#::::::::............
+   0.530 |~####::::
+   0.650 |~####::::
+         +---------------------
+          birth
+          0.05             0.65
+
+  # complex   : near   ~ chaotic   . frozen   @ saturated   (blank) empty
+
+19.0% of the swept area produced a complex universe (84 of 441 settings)
+but those 441 settings denote only 42 distinct laws, of which 8 were productive
+```
+
+**The productive band is a minority, not a sliver.** 19% of the laws this sweep
+can reach produce something complex. Fine-tuning holds here, but in a weaker
+form than the argument usually assumes — a creator picking blindly would find an
+interesting universe about one time in five.
+
+**Area is the resolution of the sweep; laws are the resolution of the
+universe.** 441 grid settings denote only 42 distinct rules, because a
+neighbourhood of eight cells only ever has densities `k/8` and nudging a band
+centre usually changes nothing. Reporting the area fraction alone would have
+described the sweep's own granularity and called it a property of physics.
+
+**Chaos is not complexity, and the first bar could not tell.** Complexity sits
+*between* order and chaos, so every criterion has to be a band rather than a
+floor. The first version required activity above a minimum — which admitted the
+rules that churn hardest, one of them at twenty times Conway's activity, a world
+rewriting itself completely every tick. Wolfram's class 3 sailed in as class 4.
+
+**Raw variance is nearly a function of density.** The first structure measure
+ranked a regular blinking tiling above Conway. Dividing by what uncorrelated
+noise of the same density would give removes the density dependence: 1 is
+chance, above is clumped, below is more even than chance.
+
+**What this does not show.** The bar is calibrated from Conway, so "productive"
+means *resembling the one setting already believed interesting*. It is a measure
+of resemblance, not of worth. Two constants were swept out of the many a
+universe has, and the band widths were held fixed.
+
 ## Theory → module map
 
 Each module's docs state which theory it implements and what would falsify it
@@ -300,6 +358,7 @@ Each module's docs state which theory it implements and what would falsify it
 | `layer` | Nesting: layers hosting layers, each poorer than its host | 2 |
 | `pipe` | The one-way serializing channel; the horizon and the logging threshold | 3, 4 |
 | `detector` | Whether an inhabitant can find the limits from inside | 1, 4 |
+| `sweep` | Fine-tuning: how narrow the productive band of constants is | 6 |
 | `report` | CSV, JSON, and a summary that declines to overstate the result | 4 |
 
 The macro grid that `report` compares runs on is the **logging threshold** from
@@ -360,13 +419,11 @@ looked at).
 ## Roadmap
 
 Done: **v0.1** limits as optimizations, **v0.2** nesting and degradation,
-**v0.3** the pipe, **v0.4** detection.
+**v0.3** the pipe, **v0.4** detection, **v0.5** the fine-tuning sweep.
 
-Next, in order:
+Next:
 
-1. **Fine-tuning sweep** — how thin the band of complexity-producing constants
-   actually is.
-2. **Emergence** — bootloader life. The hardest and slowest; emergence cannot
+1. **Emergence** — bootloader life. The hardest and slowest; emergence cannot
    be scheduled.
 
 Also later, not scoped: a Python notebook shell for analysing experiment
