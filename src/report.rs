@@ -13,6 +13,7 @@
 
 use crate::experiment::{Comparison, Experiment};
 use crate::layer::Chain;
+use crate::pipe::{self, Horizon, Relay};
 use std::fmt::Write as _;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -484,6 +485,186 @@ fn chain_verdict(chain: &Chain) -> String {
     s
 }
 
+// ---------------------------------------------------------------------------
+// Theory 3: the pipe
+// ---------------------------------------------------------------------------
+
+const PIPE_COLUMNS: &[&str] = &["threshold", "visible_fraction", "samples", "correlation"];
+
+pub fn pipe_to_csv(relay: &Relay) -> String {
+    let mut s = PIPE_COLUMNS.join(",");
+    s.push('\n');
+    for row in relay.threshold_sweep(pipe::THRESHOLDS) {
+        let _ = writeln!(
+            s,
+            "{:.4},{:.6},{},{:.6}",
+            row.threshold, row.visible_fraction, row.samples, row.correlation
+        );
+    }
+    s
+}
+
+pub fn pipe_to_json(relay: &Relay) -> String {
+    let mut s = String::from("{\n");
+    let _ = writeln!(
+        s,
+        "  \"horizon\": {{\"x\": {}, \"y\": {}, \"width\": {}, \"height\": {}}},",
+        relay.horizon.x, relay.horizon.y, relay.horizon.width, relay.horizon.height
+    );
+    let _ = writeln!(
+        s,
+        "  \"content_bits\": {}, \"message_bits\": {}, \"compression_ratio\": {:.8},",
+        relay.horizon.content_bits(),
+        Horizon::MESSAGE_BITS,
+        relay.horizon.compression_ratio()
+    );
+    let _ = writeln!(
+        s,
+        "  \"messages\": {}, \"content_avalanche\": {:.6}, \"magnitude_correlation\": {:.6},",
+        relay.received.all().len(),
+        relay.content_avalanche,
+        relay.magnitude_correlation()
+    );
+    s.push_str("  \"thresholds\": [\n");
+    let rows = relay.threshold_sweep(pipe::THRESHOLDS);
+    for (i, r) in rows.iter().enumerate() {
+        let _ = write!(
+            s,
+            "    {{\"threshold\": {:.4}, \"visible_fraction\": {:.6}, \"samples\": {}, \"correlation\": {:.6}}}",
+            r.threshold, r.visible_fraction, r.samples, r.correlation
+        );
+        if i + 1 < rows.len() {
+            s.push(',');
+        }
+        s.push('\n');
+    }
+    s.push_str("  ]\n}\n");
+    s
+}
+
+pub fn write_pipe(relay: &Relay, out_dir: &Path) -> io::Result<Written> {
+    std::fs::create_dir_all(out_dir)?;
+    let csv = out_dir.join("pipe.csv");
+    let json = out_dir.join("pipe.json");
+    std::fs::write(&csv, pipe_to_csv(relay))?;
+    std::fs::write(&json, pipe_to_json(relay))?;
+    Ok(Written { csv, json })
+}
+
+pub fn pipe_summary(relay: &Relay) -> String {
+    let mut s = String::new();
+    let h = &relay.horizon;
+
+    let _ = writeln!(
+        s,
+        "horizon {}x{} at ({}, {}): {} bits of content per tick, {} bits transmitted",
+        h.width,
+        h.height,
+        h.x,
+        h.y,
+        h.content_bits(),
+        Horizon::MESSAGE_BITS
+    );
+    let _ = writeln!(
+        s,
+        "the channel carries {:.2}% of what a faithful description would need\n",
+        h.compression_ratio() * 100.0
+    );
+
+    let _ = writeln!(
+        s,
+        "content structure: {:.1}% of digest bits flip when one cell changes",
+        relay.content_avalanche * 100.0
+    );
+    let _ = writeln!(
+        s,
+        "timing and magnitude: correlation {:.4} between what crossed and what the child was doing\n",
+        relay.magnitude_correlation()
+    );
+
+    let _ = writeln!(
+        s,
+        "{:>10}  {:>10}  {:>8}  {:>12}",
+        "threshold", "registers", "events", "correlation"
+    );
+    let _ = writeln!(s, "{}", "-".repeat(48));
+    for r in relay.threshold_sweep(pipe::THRESHOLDS) {
+        let corr = if r.correlation.is_nan() {
+            format!("too few (<{})", pipe::MIN_CORRELATION_SAMPLES)
+        } else {
+            format!("{:.4}", r.correlation)
+        };
+        let _ = writeln!(
+            s,
+            "{:>10.2}  {:>9.1}%  {:>8}  {corr:>12}",
+            r.threshold,
+            r.visible_fraction * 100.0,
+            r.samples
+        );
+    }
+
+    s.push('\n');
+    s.push_str(&pipe_verdict(relay));
+    s
+}
+
+fn pipe_verdict(relay: &Relay) -> String {
+    let mut s = String::new();
+    let a = relay.content_avalanche;
+    let c = relay.magnitude_correlation();
+
+    if (0.35..=0.65).contains(&a) {
+        let _ = writeln!(
+            s,
+            "content did not survive: a one-cell change scatters the digest, so comparing\n\
+             digests recovers nothing about the arrangement"
+        );
+    } else {
+        let _ = writeln!(
+            s,
+            "content partly survived ({a:.3} avalanche) -- the fold is not destroying structure\n\
+             the way a serializing write should"
+        );
+    }
+
+    if c.is_nan() {
+        let _ = writeln!(
+            s,
+            "magnitude carried nothing measurable: the child never varied"
+        );
+    } else if c.abs() >= 0.5 {
+        let _ = writeln!(
+            s,
+            "timing and magnitude did survive: what crossed tracks the child at {c:.4}, from a\n\
+             channel carrying {:.2}% of the information",
+            relay.horizon.compression_ratio() * 100.0
+        );
+    } else {
+        let _ = writeln!(
+            s,
+            "timing and magnitude survived only weakly ({c:.4}); the keyhole is a poor guide to\n\
+             the room"
+        );
+    }
+
+    // Where the parent stops seeing anything at all.
+    let sweep = relay.threshold_sweep(pipe::THRESHOLDS);
+    if let Some(blind) = sweep.iter().find(|r| r.visible_fraction == 0.0) {
+        let _ = writeln!(
+            s,
+            "above a logging threshold of {:.2} the child stops existing as far as the parent\n\
+             is concerned -- not quietly, not in aggregate, not at all",
+            blind.threshold
+        );
+    }
+
+    s.push_str(
+        "\nthe child was not told it was being read, and holds no type that could tell it.\n\
+         mutual blindness here is enforced by the compiler rather than by convention.\n",
+    );
+    s
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -517,6 +698,7 @@ mod tests {
                 out_dir: "out".into(),
             },
             nesting: Degradation::default(),
+            horizon: crate::pipe::Horizon::default(),
         };
         run_all(&cfg, |_| {})
     }
@@ -544,6 +726,44 @@ mod tests {
         let s = summary(&exp());
         assert!(s.contains("chaos"), "summary must state the floor: {s}");
         assert!(s.contains("vs floor"));
+    }
+
+    /// Every CSV here writes its header from a `const` and its rows from a
+    /// separate format string, so the two can drift apart silently. They did
+    /// once: `pipe.csv` shipped four fields under a three-field header because
+    /// a formatter reflowed the constant out of a patch's way. One guard per
+    /// CSV, no exceptions.
+    fn assert_rectangular(csv: &str, expected: usize) {
+        let mut lines = csv.lines();
+        let header = lines.next().expect("a header");
+        assert_eq!(header.split(',').count(), expected, "header: {header}");
+        for line in lines {
+            assert_eq!(line.split(',').count(), expected, "row: {line}");
+        }
+    }
+
+    #[test]
+    fn pipe_csv_is_rectangular() {
+        let relay = Relay {
+            horizon: Horizon::default(),
+            received: crate::pipe::WriteEnd::new().seal(),
+            child_truth: vec![0.1, 0.2, 0.3],
+            content_avalanche: 0.5,
+        };
+        assert_rectangular(&pipe_to_csv(&relay), PIPE_COLUMNS.len());
+    }
+
+    #[test]
+    fn chain_csv_is_rectangular() {
+        let chain = Chain {
+            root_budget: crate::budget::Budget::new(1000),
+            degradation: crate::budget::Degradation::default(),
+            predicted_max_depth: 0,
+            layers: Vec::new(),
+            total_work: 0,
+            total_cost_bound: 0.0,
+        };
+        assert_rectangular(&chain_to_csv(&chain), CHAIN_COLUMNS.len());
     }
 
     #[test]

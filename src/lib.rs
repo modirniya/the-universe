@@ -23,6 +23,7 @@
 //! - [`observer`] — probes, and the render/collapse events
 //! - [`experiment`] — the benchmark that compares constrained to unconstrained
 //! - [`layer`] — nesting: layers hosting layers, each poorer than its host
+//! - [`pipe`] — the one-way serializing channel between layers
 //! - [`report`] — CSV, JSON and a summary that declines to overstate the result
 //! - [`rng`] — the creator's input channel; the reason runs are reproducible
 //!
@@ -43,6 +44,7 @@ pub mod experiment;
 pub mod layer;
 pub mod observer;
 pub mod physics;
+pub mod pipe;
 pub mod report;
 pub mod rng;
 pub mod space;

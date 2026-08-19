@@ -41,6 +41,7 @@ fn cfg(seed: u64) -> Config {
             out_dir: "out".into(),
         },
         nesting: Degradation::default(),
+        horizon: the_universe::pipe::Horizon::default(),
     }
 }
 

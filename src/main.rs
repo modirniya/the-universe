@@ -6,7 +6,7 @@ use std::process::ExitCode;
 
 use the_universe::budget::Budget;
 use the_universe::config::Config;
-use the_universe::{experiment, layer, report};
+use the_universe::{experiment, layer, pipe, report};
 
 const USAGE: &str = "\
 the-universe — a runnable model of a simulation-hypothesis framework
@@ -14,6 +14,7 @@ the-universe — a runnable model of a simulation-hypothesis framework
 USAGE:
     the-universe run  --config <FILE> [OPTIONS]
     the-universe nest --config <FILE> [OPTIONS]
+    the-universe pipe --config <FILE> [OPTIONS]
 
 COMMANDS:
     run     Compare an unconstrained universe against one with each limit in
@@ -23,6 +24,11 @@ COMMANDS:
     nest    Build a chain of universes, each running on a fraction of its
             host's budget, and report how deep it gets before it cannot
             afford another. (Theory 2: nesting and degradation.)
+
+    pipe    Transmit a universe through a one-way serializing channel and
+            report what survived: whether the arrangement did, whether the
+            timing and magnitude did, and what a parent sees at each logging
+            threshold. (Theory 3: black holes as pipes.)
 
 OPTIONS:
     --config <FILE>   Universe definition (TOML). Required.
@@ -71,6 +77,8 @@ enum Command {
     Run,
     /// Theory 2: how deep a chain of universes gets.
     Nest,
+    /// Theory 3: what survives a one-way serializing channel.
+    Pipe,
 }
 
 /// `Ok(None)` means help was requested.
@@ -85,9 +93,10 @@ fn parse(argv: Vec<String>) -> Result<Option<Args>, String> {
     let command = match cmd.as_str() {
         "run" => Command::Run,
         "nest" => Command::Nest,
+        "pipe" => Command::Pipe,
         other => {
             return Err(format!(
-                "unknown command `{other}`; the commands are `run` and `nest`"
+                "unknown command `{other}`; the commands are `run`, `nest` and `pipe`"
             ));
         }
     };
@@ -167,7 +176,28 @@ fn execute(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
     match args.command {
         Command::Run => execute_run(&cfg, &out_dir),
         Command::Nest => execute_nest(&cfg, &out_dir, args.budget),
+        Command::Pipe => execute_pipe(&cfg, &out_dir),
     }
+}
+
+fn execute_pipe(cfg: &Config, out_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    println!(
+        "child universe: {}x{} base cells, {} ticks, seed {}",
+        cfg.world.width, cfg.world.height, cfg.world.ticks, cfg.world.seed
+    );
+    println!("transmitting one message per tick through the horizon\n");
+
+    let relay = pipe::run_relay(cfg, &cfg.horizon);
+
+    print!("{}", report::pipe_summary(&relay));
+
+    let written = report::write_pipe(&relay, out_dir)?;
+    println!(
+        "\nwrote {} and {}",
+        written.csv.display(),
+        written.json.display()
+    );
+    Ok(())
 }
 
 fn execute_run(cfg: &Config, out_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
@@ -290,6 +320,12 @@ mod tests {
     #[test]
     fn unknown_command_is_rejected() {
         assert!(parse(argv("simulate --config c.toml")).is_err());
+    }
+
+    #[test]
+    fn pipe_is_a_command() {
+        let a = parse(argv("pipe --config c.toml")).unwrap().unwrap();
+        assert_eq!(a.command, Command::Pipe);
     }
 
     #[test]

@@ -7,6 +7,7 @@ use crate::budget::Degradation;
 use crate::constraints::{Constraints, Params};
 use crate::observer::Probe;
 use crate::physics::Rules;
+use crate::pipe::Horizon;
 use serde::Deserialize;
 use std::path::Path;
 
@@ -26,6 +27,9 @@ pub struct Config {
     /// Theory 2. Only read by the `nest` command.
     #[serde(default)]
     pub nesting: Degradation,
+    /// Theory 3. Only read by the `pipe` command.
+    #[serde(default)]
+    pub horizon: Horizon,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize)]
@@ -141,6 +145,16 @@ impl Config {
         }
         if let Err(m) = self.nesting.validate() {
             return bad(m);
+        }
+        if self.horizon.width == 0 || self.horizon.height == 0 {
+            return bad(
+                "horizon.width and horizon.height must be greater than 0: a write \
+                        surface with no area transmits nothing"
+                    .into(),
+            );
+        }
+        if self.horizon.x >= self.world.width || self.horizon.y >= self.world.height {
+            return bad("horizon origin lies outside the world".into());
         }
         Ok(())
     }

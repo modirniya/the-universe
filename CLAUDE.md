@@ -8,7 +8,7 @@ Open-source **executable philosophy**: a runnable model of a simulation-hypothes
 
 **Honest framing, which is a deliverable and not a disclaimer:** running this proves the ideas are *coherent*, not that our universe works this way. The model makes falsifiable predictions only about its own behaviour. Any summary the code prints must decline to overstate the result (`report::verdict` ends with this and a test enforces it). Philosophy that can't be coded lives in `docs/philosophy.md`, not in the code.
 
-v0.1 and v0.2 are complete: one layer with four constraint toggles and a benchmark (Theory 1), plus chains of layers under the degradation rule (Theory 2).
+v0.1 through v0.3 are complete: one layer with four constraint toggles and a benchmark (Theory 1), chains of layers under the degradation rule (Theory 2), and the one-way serializing channel between layers (Theories 3 and 4).
 
 ## Commands
 
@@ -16,11 +16,13 @@ v0.1 and v0.2 are complete: one layer with four constraint toggles and a benchma
 cargo run --release -- run  --config configs/default.toml  # Theory 1 experiment, ~11s on M1 Air
 cargo run --release -- run  --config configs/quick.toml    # small world for iterating
 cargo run --release -- nest --config configs/nesting.toml  # Theory 2 chain, <1s
-cargo test                                                 # 108 tests
+cargo run --release -- pipe --config configs/pipe.toml     # Theory 3 relay, <1s
+cargo test                                                 # 136 tests
 cargo test physics::                                       # one module
 cargo test blinker_oscillates_with_period_two              # one test by name
 cargo test --test determinism                              # the same-seed-same-universe suite
 cargo test --test nesting                                  # Theory 2 end to end
+cargo test --test pipe                                     # Theory 3 end to end
 cargo test -- --nocapture                                  # see println! from tests
 cargo clippy --all-targets -- -D warnings                  # kept clean
 cargo fmt
@@ -50,14 +52,17 @@ Single crate. Module names match theory names — this is deliberate and load-be
 | `experiment` | Runs each constraint setting, computes cost ratios and divergences |
 | `budget` | Degradation rule; closed-form depth bound |
 | `layer` | Nesting: sizes each layer to its budget, runs the chain |
+| `pipe` | Horizon, serialization, `WriteEnd`/`ReadEnd`, logging threshold |
 | `report` | CSV, JSON, printed summary and verdict |
 | `config` | TOML loading and validation |
 
 **The loop** (`experiment::run`) is the whole model in three lines: `observe` forces detail into existence where something is looking → `tick` applies the laws → record what an outside observer could have seen.
 
-### Three things worth understanding before editing
+### Four things worth understanding before editing
 
 **Two-fidelity storage.** `World` holds `cells` (one byte each) *and* `coarse` (one density per block), with `resolved[b]` deciding which is authoritative. `World::sample` is the seam: inside a resolved block it reads the cell, inside an unresolved one it returns the block's density. That single function is where lazy rendering's cost saving *and* its error both come from. Physics reads neighbours only through it.
+
+**Mutual blindness is a type-system invariant, not a convention.** `pipe::WriteEnd` has `write` and `seal` and nothing else — no method returns anything about the far side. `ReadEnd` cannot write, and nothing converts it back. Do not add a read method, a receipt, an acknowledgement, or a `&mut` accessor that hands out both halves: the whole point is that a child cannot discover it is being read. If a future milestone needs bidirectional flow, that is a new type, not a loosened one.
 
 **Cost is quantized, and not monotonic in world size.** Lazy rendering charges by the block, and `layer::scale_probe` rescales the probe with the world — so a probe landing on block boundaries resolves far fewer blocks than one of the same area straddling them. A 48×48 layer costs more than a 64×64 one. This is why `layer::fit_spec` scans the whole range instead of walking down from an area estimate, and why `layer::predict_work` builds the real `Geometry` rather than estimating from coverage. `predict_work` is *exact*, and a test asserts equality with what the run spends; if that ever weakens to an inequality, the budget check has quietly become a guess.
 
@@ -94,6 +99,11 @@ From v0.2:
 - `Degradation::max_depth` is an **upper bound**, not an equality: integer flooring at each generation costs real chains depth.
 - A child with budget slack legitimately keeps its host's size — shrinkage is derived from scarcity, never imposed. Pinned by `a_child_with_slack_may_keep_its_hosts_size`.
 
+From v0.3:
+
+- Theory 3's split holds: content is destroyed (50.2% digest avalanche on a one-cell change) while timing and magnitude survive (0.79 correlation) through a channel carrying 5.6% of the information.
+- **Threshold sweeps manufacture perfect correlations.** The first version of the report showed 1.0000 at a high threshold — from two data points, where Pearson is always ±1. `MIN_CORRELATION_SAMPLES` refuses to print a correlation below five events, and the sweep shows the event count beside every row. Any future statistic computed over a filtered subset needs the same guard.
+
 ## Decisions already made — do not relitigate
 
 - **Language: Rust.** Strict compiler substitutes for human language expertise in an AI-built, AI-consumed codebase; supports the paradigm split; single fast binary; WASM later.
@@ -105,9 +115,9 @@ From v0.2:
 
 ## Roadmap
 
-Done: v0.1 (limits as optimizations), v0.2 (nesting and degradation).
+Done: v0.1 (limits as optimizations), v0.2 (nesting and degradation), v0.3 (the pipe).
 
-Next, in order: **pipe** → **detection** → **fine-tuning sweep** → **emergence**. Also later: Python notebook shell for analysing output, visuals, WASM build.
+Next, in order: **detection** → **fine-tuning sweep** → **emergence**. Also later: Python notebook shell for analysing output, visuals, WASM build.
 
 This order is firm. Finish a milestone before starting the next, and do not widen the current one to include the next even where they touch — layers currently cannot reach each other, and that omission belongs to the pipe milestone, not this one.
 

@@ -69,10 +69,14 @@ jobs:
       - name: Run the documented nesting chain
         run: cargo run --release -- nest --config configs/nesting.toml
 
+      - name: Run the documented pipe relay
+        run: cargo run --release -- pipe --config configs/pipe.toml
+
       - name: Artifacts were written
         run: |
           test -s out/runs.csv && test -s out/report.json
           test -s out/nesting/chain.csv && test -s out/nesting/chain.json
+          test -s out/pipe/pipe.csv && test -s out/pipe/pipe.json
 
       - name: Constraints reduce work, and the control is non-degenerate
         run: |
@@ -146,6 +150,53 @@ jobs:
               print("\nFAILED:", *fail, sep="\n  ")
               sys.exit(1)
           print("\nnesting invariants hold")
+          PY
+
+      - name: Pipe claims hold
+        run: |
+          python3 - <<'PY'
+          import csv, json, sys
+
+          d = json.load(open("out/pipe/pipe.json"))
+          rows = list(csv.DictReader(open("out/pipe/pipe.csv")))
+          fail = []
+
+          # Theory 3 has two halves and they pull opposite ways.
+          av = d["content_avalanche"]
+          if not 0.35 <= av <= 0.65:
+              fail.append(f"content avalanche {av:.3f} is outside [0.35, 0.65]")
+
+          corr = d["magnitude_correlation"]
+          if corr < 0.5:
+              fail.append(f"magnitude correlation {corr:.3f} fell below 0.5")
+
+          if d["compression_ratio"] >= 0.10:
+              fail.append(f"channel carries {d['compression_ratio']:.3f}, too wide to be a bottleneck")
+
+          # Raising the threshold must never reveal more.
+          vis = [float(r["visible_fraction"]) for r in rows]
+          for a, b in zip(vis, vis[1:]):
+              if b > a:
+                  fail.append("a higher threshold showed more of the child")
+
+          # No correlation may be reported from too few events.
+          for r in rows:
+              if int(r["samples"]) < 5 and r["correlation"] != "NaN":
+                  fail.append(
+                      f"threshold {r['threshold']} reported {r['correlation']} "
+                      f"from {r['samples']} events"
+                  )
+
+          print(f"avalanche {av:.3f}  correlation {corr:.3f}  "
+                f"channel {d['compression_ratio']*100:.2f}%")
+          for r in rows:
+              print(f"  threshold {r['threshold']}: {float(r['visible_fraction'])*100:5.1f}% "
+                    f"over {r['samples']:>4} events")
+
+          if fail:
+              print("\nFAILED:", *fail, sep="\n  ")
+              sys.exit(1)
+          print("\npipe claims hold")
           PY
 
   macos:

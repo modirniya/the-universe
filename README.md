@@ -34,15 +34,16 @@ cheaper without changing what it produces?*
 ```sh
 cargo run --release -- run  --config configs/default.toml   # Theory 1: what the limits cost
 cargo run --release -- nest --config configs/nesting.toml   # Theory 2: how deep a chain gets
+cargo run --release -- pipe --config configs/pipe.toml      # Theory 3: what survives the crossing
 ```
 
-The `run` experiment takes about 11 seconds on an M1 Air; `nest` takes under a
-second. `configs/quick.toml`
+The `run` experiment takes about 11 seconds on an M1 Air; `nest` and `pipe`
+take under a second each. `configs/quick.toml`
 is a much smaller world for iterating on code — too short to draw conclusions
 from.
 
 ```sh
-cargo test                          # 108 tests, most of them on the physics
+cargo test                          # 136 tests, most of them on the physics
 cargo run --release -- --help
 ```
 
@@ -169,6 +170,63 @@ an upper bound, not an equality, and is documented as one.
 serializing channel between them is v0.3, so the mutual blindness here is an
 omission rather than a claim.
 
+## v0.3: the pipe
+
+Theory 3 says a black hole is a one-way serializing channel: content structure
+is destroyed, but *timing and magnitude* may survive. Both halves are testable,
+and they pull in opposite directions — a channel that preserved everything
+would not be a pipe, and one that preserved nothing would carry no signal.
+
+```sh
+cargo run --release -- pipe --config configs/pipe.toml
+```
+
+```
+horizon 48x48 at (48, 48): 2304 bits of content per tick, 128 bits transmitted
+the channel carries 5.56% of what a faithful description would need
+
+content structure: 50.2% of digest bits flip when one cell changes
+timing and magnitude: correlation 0.7884 between what crossed and what the child was doing
+
+ threshold   registers    events   correlation
+      0.00      100.0%       300        0.7884
+      0.10       35.3%       106        0.5886
+      0.15       16.7%        50        0.2911
+      0.20        4.7%        14        0.5536
+      0.30        0.7%         2  too few (<5)
+      0.50        0.0%         0  too few (<5)
+```
+
+**Content did not survive.** Changing one cell of the horizon flips 50.2% of
+the digest's bits — the signature of a hash. No amount of comparing what came
+out recovers the arrangement that went in.
+
+**Timing and magnitude did.** What crossed tracks the child's global behaviour
+at 0.79, through a channel carrying 5.6% of the information. Theory 3's split
+survives contact with an implementation: the pipe destroys the *what* while
+preserving the *when* and the *how much*.
+
+**Mutual blindness is enforced by the compiler, not by convention.** The child
+holds a `WriteEnd`, which has `write` and nothing else — no method returns
+anything about the far side, so a universe on that end cannot discover it is
+being read, or by what. `WriteEnd::seal` consumes it to produce the `ReadEnd`,
+and there is no path back. In a project that chose Rust because a strict
+compiler substitutes for human language expertise, this seemed like the right
+thing to make unrepresentable rather than merely documented.
+
+**The logging threshold makes a child vanish.** At a threshold of 0.10 barely a
+third of the child's history registers; past 0.50, nothing does — not quietly,
+not in aggregate, not at all. This is Theory 4's uncomfortable idea made
+concrete: a parent watching a dashboard at the wrong resolution is not hostile
+or absent, just tuned past you.
+
+**A trap worth naming.** The first version of that table reported a correlation
+of **1.0000** at threshold 0.30, which looked like the strongest result in it.
+That row had two data points, and Pearson on two points is always exactly ±1.
+The sweep now reports the event count beside every row and refuses to print a
+correlation below five, because a high threshold admitting a handful of events
+is exactly the situation that manufactures perfect correlations out of noise.
+
 ## Theory → module map
 
 Each module's docs state which theory it implements and what would falsify it
@@ -184,6 +242,7 @@ Each module's docs state which theory it implements and what would falsify it
 | `experiment` | The ON/OFF benchmark and its control | 1 |
 | `budget` | The degradation rule; what a layer may spend | 2 |
 | `layer` | Nesting: layers hosting layers, each poorer than its host | 2 |
+| `pipe` | The one-way serializing channel; the horizon and the logging threshold | 3, 4 |
 | `report` | CSV, JSON, and a summary that declines to overstate the result | 4 |
 
 The macro grid that `report` compares runs on is the **logging threshold** from
@@ -243,17 +302,16 @@ looked at).
 
 ## Roadmap
 
-Done: **v0.1** limits as optimizations, **v0.2** nesting and degradation.
+Done: **v0.1** limits as optimizations, **v0.2** nesting and degradation,
+**v0.3** the pipe.
 
 Next, in order:
 
-1. **Pipe** — the one-way serializing channel between layers; whether timing
-   and magnitude survive when content does not.
-2. **Detection** — agents inside a layer trying to determine, from within,
+1. **Detection** — agents inside a layer trying to determine, from within,
    whether they are running under limits.
-3. **Fine-tuning sweep** — how thin the band of complexity-producing constants
+2. **Fine-tuning sweep** — how thin the band of complexity-producing constants
    actually is.
-4. **Emergence** — bootloader life. The hardest and slowest; emergence cannot
+3. **Emergence** — bootloader life. The hardest and slowest; emergence cannot
    be scheduled.
 
 Also later, not scoped: a Python notebook shell for analysing experiment

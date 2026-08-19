@@ -338,6 +338,7 @@ mod tests {
                 out_dir: "out".into(),
             },
             nesting: Degradation::default(),
+            horizon: crate::pipe::Horizon::default(),
         }
     }
 

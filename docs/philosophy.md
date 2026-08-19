@@ -88,7 +88,17 @@ What might survive serialization is not content but *timing and magnitude*: how
 much went in, and when. A parent reading the far end of the pipe would receive
 something closer to a log line than a message.
 
-**In the code:** v0.3 milestone.
+**In the code:** `pipe`. The horizon is a region of the child universe folded
+into one 128-bit message per tick, whatever its area. Serialization is
+position-sensitive, so the digest depends on the arrangement — and avalanching,
+so it cannot be read back as one.
+
+**What would falsify it within the model:** content structure surviving the
+crossing (the digest tracking the arrangement instead of scattering), or timing
+and magnitude *not* surviving (a parent's view uncorrelated with the child's
+behaviour, meaning the pipe carries nothing at all). Neither happened: a
+one-cell change flips half the digest, while what crossed still tracks the child
+at 0.79 through a channel carrying 5.6% of the information.
 
 ---
 
@@ -113,8 +123,17 @@ at different internal resolutions cannot be compared cell by cell, so the code
 compares them at a coarse macro grid — deliberately the parent's-eye view.
 Divergence is measured where an outside observer would actually be looking.
 
-**In the code:** `space::macro_field`, `report`. The threshold is a real
-parameter (`report.macro_grid`) rather than a metaphor.
+**In the code:** `space::macro_field` and `report` for the experiment's own use
+of the idea; `pipe` for the real thing. The threshold is a parameter, not a
+metaphor: `ReadEnd::above` is the entire extent of a parent's access to a child,
+and below it nothing registers.
+
+The blindness itself is enforced by the type system. A child holds a `WriteEnd`,
+which exposes no method returning anything about the far side, so it cannot
+learn that it is read or by what; a parent holds a `ReadEnd`, which cannot write.
+There is no conversion back. Making this unrepresentable rather than merely
+documented is the clearest use the project has found for choosing a language
+with a strict compiler.
 
 ---
 
