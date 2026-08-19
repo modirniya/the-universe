@@ -532,13 +532,35 @@ universe is), `params.capped_radius` / `uncapped_radius` (the speed of light),
 `params.block_size` (granularity of lazy rendering), and `observer` (what gets
 looked at).
 
+## Checking the numbers a second way
+
+`analysis/` reads the artifacts the runs produced and checks the README against
+them, with different code in a different language.
+
+```sh
+python3 -m venv analysis/.venv
+analysis/.venv/bin/pip install -r analysis/requirements.txt
+analysis/.venv/bin/python analysis/verify.py     # cross-check; non-zero on drift
+analysis/.venv/bin/python analysis/figures.py    # draw the findings
+```
+
+It establishes nothing. Every claim here is made by a `cargo` command and
+checked by CI from the same artifacts; this is a second reader, and where the
+two disagree the CLI is right. It is deliberately kept out of CI, because adding
+it as a gate would quietly make a Python script load-bearing for claims that are
+supposed to rest on `cargo` alone.
+
+Wall time is the one figure it declines to check — a measurement rather than a
+counter, and the machine that wrote the README is not the machine reading it.
+
 ## Roadmap
 
 Every milestone on the original roadmap is done, and v0.7 makes it watchable:
 
 **v0.1** limits as optimizations · **v0.2** nesting and degradation ·
 **v0.3** the pipe · **v0.4** detection · **v0.5** the fine-tuning sweep ·
-**v0.6** bootloader life · **v0.7** WebAssembly and the viewer
+**v0.6** bootloader life · **v0.7** WebAssembly and the viewer ·
+**v0.8** the analysis shell
 
 The six theories in [`docs/philosophy.md`](docs/philosophy.md) each have a
 module that implements them and a command that tests them, and v0.6 closes the
