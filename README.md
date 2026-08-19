@@ -2,6 +2,10 @@
 
 [![CI](https://github.com/modirniya/the-universe/actions/workflows/ci.yml/badge.svg)](https://github.com/modirniya/the-universe/actions/workflows/ci.yml)
 
+**[▶ Watch it run](https://modirniya.github.io/the-universe/)** — the same
+universe this repo describes, running in a browser tab, with its optimizations
+switched on and off by hand.
+
 Open-source **executable philosophy**: a runnable model of a
 simulation-hypothesis framework developed by Parham Modirniya. The codebase
 *is* the argument. Each module implements one theory, and a successful run
@@ -28,6 +32,25 @@ where something is looking are the three an engineer would reach for first.
 That is testable inside a toy. Build a small universe, run it with the limits
 in force and without them, and ask: *do the creator's limits make a universe
 cheaper without changing what it produces?*
+
+## Watch it run
+
+[modirniya.github.io/the-universe](https://modirniya.github.io/the-universe/)
+
+The page runs the real thing: the Rust core compiled to WebAssembly, the same
+code the CLI runs. It draws the philosophy rather than the cells.
+
+**What the shading means.** Grainy ground is being computed cell by cell.
+Smooth amber ground is not being computed at all — it is a single density
+standing in for a whole region, and it only becomes cells when the probe
+arrives. That moment is drawn: a region forced into existence flashes teal, one
+abandoned flashes clay. Move the probe by clicking, and you can watch regions
+being paid for and given up.
+
+The two dials are worth a minute. Set the radius to 2 and substeps to 3, then
+the radius to 3 and substeps to 2. The influence figure reads 6.00 both times,
+because it is their product — which is the v0.4 finding, available to anyone
+who fiddles rather than reads.
 
 ## Quick start
 
@@ -398,6 +421,40 @@ Nothing in this model builds a computer. It shows that the transport such a
 thing would require is available, and that a layer without it has no way to seed
 the next one.
 
+## v0.7: the universe becomes watchable
+
+The tree is now a workspace. `universe-core` is the crate the first six
+milestones built, unchanged in behaviour and still on two dependencies;
+`universe-web` is a thin bridge carrying the one dependency a browser needs. All
+six documented commands were run before and after the split and their output
+diffed: everything reproducible is identical.
+
+**Determinism is now checked across platforms, not just across runs.** Until
+v0.7 the first rule was really "same seed, same universe, on this laptop". So
+there is a reference universe with every parameter pinned, run for 64 ticks and
+reduced to a single number by folding every field — densities by exact bit
+pattern, using the project's own generator rather than `DefaultHasher`, which
+promises nothing across versions or platforms.
+
+The native suite asserts that constant. The WebAssembly suite asserts the same
+constant. Neither target ever sees the other's answer; they agree by both
+matching it, or they do not agree at all.
+
+```
+aarch64-apple-darwin     6900610681785451805
+wasm32-unknown-unknown   6900610681785451805
+```
+
+The value stream survives a change of platform, which is what the hand-written
+SplitMix64 and the positional sub-streams were for. The viewer computes the same
+number in the visitor's browser and shows it beside the native one.
+
+**Two things the browser found that a test suite had not.** Step did not repaint
+until the next animation frame, so a paused visitor clicking it saw nothing
+happen; every state change now repaints immediately. And a dial whose limit is in
+force does nothing at all — silently, which is the worst way to teach it. Those
+dials now dim and name the limit pinning them.
+
 ## Theory → module map
 
 Each module's docs state which theory it implements and what would falsify it
@@ -417,6 +474,7 @@ Each module's docs state which theory it implements and what would falsify it
 | `detector` | Whether an inhabitant can find the limits from inside | 1, 4 |
 | `sweep` | Fine-tuning: how narrow the productive band of constants is | 6 |
 | `bootloader` | Structures that transport computation; the seed handed down | 5 |
+| `golden` | One fixed universe reduced to one number, compared across targets | — |
 | `report` | CSV, JSON, and a summary that declines to overstate the result | 4 |
 
 The macro grid that `report` compares runs on is the **logging threshold** from
@@ -476,19 +534,18 @@ looked at).
 
 ## Roadmap
 
-Every milestone on the original roadmap is done:
+Every milestone on the original roadmap is done, and v0.7 makes it watchable:
 
 **v0.1** limits as optimizations · **v0.2** nesting and degradation ·
 **v0.3** the pipe · **v0.4** detection · **v0.5** the fine-tuning sweep ·
-**v0.6** bootloader life
+**v0.6** bootloader life · **v0.7** WebAssembly and the viewer
 
 The six theories in [`docs/philosophy.md`](docs/philosophy.md) each have a
 module that implements them and a command that tests them, and v0.6 closes the
 loop by using all six at once.
 
-Beyond the roadmap, unscheduled: a Python notebook shell for analysing the CSV
-and JSON output, visuals, and a WASM build so strangers can run a universe in a
-browser tab.
+Beyond that, still unscheduled: the research track — seeded replicators,
+evolution — which stays deliberately out of scope.
 
 Also later, not scoped: a Python notebook shell for analysing experiment
 output, visuals, and a WASM build so strangers can run a universe in a browser
@@ -505,8 +562,17 @@ because WASM is a plausible later target.
 
 ```sh
 cargo build --release
-cargo test
-cargo clippy --all-targets -- -D warnings
+cargo test --workspace
+cargo clippy --workspace --all-targets -- -D warnings
+```
+
+For the browser build (needs `wasm-pack` and the `wasm32-unknown-unknown`
+target):
+
+```sh
+wasm-pack test  --node crates/universe-web          # the cross-target check
+wasm-pack build --target web --out-dir ../../web/pkg --release crates/universe-web
+cd web && python3 -m http.server 8000               # then open localhost:8000
 ```
 
 ## Licence

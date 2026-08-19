@@ -1,0 +1,88 @@
+# Builds the WebAssembly module and publishes the viewer to GitHub Pages.
+#
+# Kept separate from ci.yml on purpose: CI decides whether the code is correct,
+# this decides what the world sees. A deploy that fails should not make the
+# project look broken, and a red test should stop a deploy -- hence the
+# `needs`-free split with a build that runs the wasm tests first.
+name: Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# One deploy at a time; a queued run supersedes an older one rather than
+# racing it.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Add the WebAssembly target
+        run: rustup target add wasm32-unknown-unknown
+
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            ~/.cargo/bin/wasm-pack
+            target
+          key: ${{ runner.os }}-wasm-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-wasm-
+
+      - name: Install wasm-pack
+        run: |
+          if ! command -v wasm-pack >/dev/null; then
+            cargo install wasm-pack --locked
+          fi
+          wasm-pack --version
+
+      # The page is only worth deploying if the universe it runs is the same one
+      # the native build runs. This is the same check the native suite makes,
+      # against the same constant.
+      - name: Determinism holds on the WebAssembly target
+        run: wasm-pack test --node crates/universe-web
+
+      - name: Build the module
+        run: wasm-pack build --target web --out-dir ../../web/pkg --release crates/universe-web
+
+      - name: Assemble the site
+        run: |
+          mkdir -p dist
+          cp web/index.html web/style.css web/app.js dist/
+          cp -r web/pkg dist/pkg
+          # A .nojekyll file stops Pages ignoring the pkg directory, whose
+          # generated filenames Jekyll would otherwise treat as private.
+          touch dist/.nojekyll
+          ls -la dist dist/pkg
+
+      - uses: actions/configure-pages@v6
+
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5

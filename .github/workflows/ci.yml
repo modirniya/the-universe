@@ -37,10 +37,10 @@ jobs:
         run: cargo fmt --all -- --check
 
       - name: Clippy
-        run: cargo clippy --all-targets -- -D warnings
+        run: cargo clippy --workspace --all-targets -- -D warnings
 
       - name: Tests
-        run: cargo test --all-targets
+        run: cargo test --workspace --all-targets
 
   claims:
     name: the README's claims still hold
@@ -331,6 +331,40 @@ jobs:
           print("\nbootloader claims hold")
           PY
 
+  wasm:
+    name: same seed, same universe -- on WebAssembly
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Add the WebAssembly target
+        run: rustup target add wasm32-unknown-unknown
+
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            ~/.cargo/bin/wasm-pack
+            target
+          key: ${{ runner.os }}-wasm-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-wasm-
+
+      - name: Install wasm-pack
+        run: |
+          if ! command -v wasm-pack >/dev/null; then
+            cargo install wasm-pack --locked
+          fi
+          wasm-pack --version
+
+      # Determinism is the project's first rule, and until v0.7 it was only ever
+      # checked on one architecture. The native suite asserts a fingerprint for a
+      # fixed reference universe; this asserts the same constant after compiling
+      # the same code to a different target. Neither sees the other's answer.
+      - name: The fingerprint agrees across targets
+        run: wasm-pack test --node crates/universe-web
+
   macos:
     name: builds on the target hardware
     # The stated target is a MacBook Air M1, and macos-latest is ARM64.
@@ -338,4 +372,4 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - name: Tests
-        run: cargo test --all-targets
+        run: cargo test --workspace --all-targets
