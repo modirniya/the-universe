@@ -965,6 +965,8 @@ const DETECT_COLUMNS: &[&str] = &[
     "influence_speed_without",
     "smoothness_with",
     "smoothness_without",
+    "anisotropy_with",
+    "anisotropy_without",
 ];
 
 pub fn detect_to_csv(findings: &[Finding]) -> String {
@@ -973,7 +975,7 @@ pub fn detect_to_csv(findings: &[Finding]) -> String {
     for f in findings {
         let _ = writeln!(
             s,
-            "{},{},{},{:.6},{:.6},{},{:.6},{:.6},{:.6},{:.6}",
+            "{},{},{},{:.6},{:.6},{},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6}",
             f.gaze.label(),
             f.limit,
             f.signal,
@@ -984,13 +986,28 @@ pub fn detect_to_csv(findings: &[Finding]) -> String {
             f.without.influence_speed,
             f.with.smoothness,
             f.without.smoothness,
+            f.with.anisotropy(),
+            f.without.anisotropy(),
         );
     }
     s
 }
 
 pub fn detect_to_json(findings: &[Finding]) -> String {
-    let mut s = String::from("{\n  \"limits\": [\n");
+    let mut s = String::from("{\n");
+    if let Some(iso) = crate::detector::isotropy(findings) {
+        let _ = writeln!(
+            s,
+            "  \"isotropy\": {{\"lattice\": {}, \"finer\": {}, \"isotropic\": {:.1}, \
+             \"found\": {}, \"separates_scale\": {}}},",
+            json_f64(iso.lattice),
+            json_f64(iso.finer),
+            crate::detector::ISOTROPIC,
+            iso.found,
+            iso.separates_scale
+        );
+    }
+    s.push_str("  \"limits\": [\n");
     for (i, f) in findings.iter().enumerate() {
         let _ = write!(
             s,
@@ -1093,8 +1110,50 @@ pub fn detect_summary(findings: &[Finding]) -> String {
         let _ = writeln!(s, "{:<16} {}", f.limit, f.note);
     }
 
+    if let Some(iso) = crate::detector::isotropy(findings) {
+        s.push('\n');
+        s.push_str(&isotropy_summary(findings, &iso));
+    }
+
     s.push('\n');
     s.push_str(&detect_verdict(findings));
+    s
+}
+
+/// Is space the same in every direction? Asked of one universe, against the
+/// geometry of a continuum rather than against a second run.
+fn isotropy_summary(findings: &[Finding], iso: &crate::detector::Isotropy) -> String {
+    let mut s = String::new();
+    let Some(f) = findings.iter().find(|f| f.limit == "discrete_space") else {
+        return s;
+    };
+    let _ = writeln!(
+        s,
+        "is space isotropic? influence reaches {:.2} cells along an axis and {:.2} on a\n\
+         diagonal: anisotropy {:.4}, against {:.0} for an isotropic continuum",
+        f.with.axis_reach,
+        f.with.diagonal_reach,
+        iso.lattice,
+        crate::detector::ISOTROPIC
+    );
+    if iso.found {
+        s.push_str("the shape of the lattice is visible from inside.\n");
+    } else {
+        s.push_str("no preferred direction was measurable.\n");
+    }
+    if iso.separates_scale {
+        let _ = writeln!(
+            s,
+            "a finer lattice reads {:.4}, so the shape gives the scale away too.",
+            iso.finer
+        );
+    } else {
+        let _ = writeln!(
+            s,
+            "a finer lattice reads {:.4}, the same shape, so the scale stays hidden.",
+            iso.finer
+        );
+    }
     s
 }
 
@@ -1113,6 +1172,12 @@ fn detect_verdict(findings: &[Finding]) -> String {
 
     if !found.is_empty() {
         let _ = writeln!(s, "findable from inside: {}", found.join(", "));
+    }
+    if crate::detector::isotropy(findings).is_some_and(|i| i.found) {
+        let _ = writeln!(
+            s,
+            "findable from inside, absolutely: that space is a lattice with preferred directions"
+        );
     }
     if !hidden.is_empty() {
         let _ = writeln!(s, "leaves no fingerprint: {}", hidden.join(", "));
@@ -1699,6 +1764,23 @@ pub fn detect_ensemble_summary(runs: &[(u64, Vec<Finding>)]) -> String {
     let seeds: Vec<u64> = runs.iter().map(|(s, _)| *s).collect();
     let n = runs.len();
     ensemble_header(&mut s, &seeds);
+    let rendering = |fs: &Vec<Finding>| -> Vec<Finding> {
+        fs.iter()
+            .filter(|f| f.gaze == crate::detector::Gaze::Rendering)
+            .cloned()
+            .collect()
+    };
+    let isos: Vec<crate::detector::Isotropy> = runs
+        .iter()
+        .filter_map(|(_, fs)| crate::detector::isotropy(&rendering(fs)))
+        .collect();
+    let _ = writeln!(
+        s,
+        "lattice shape found in {}/{n} seeds, anisotropy {}; scale given away in {}/{n}",
+        isos.iter().filter(|i| i.found).count(),
+        spread_cell(&Spread::of(isos.iter().map(|i| i.lattice)), 4),
+        isos.iter().filter(|i| i.separates_scale).count()
+    );
     let _ = writeln!(
         s,
         "\n{:<24} {:<16} {:<15} {:>7}  {:<24} {:<24}",
@@ -1735,18 +1817,22 @@ pub fn detect_ensemble_summary(runs: &[(u64, Vec<Finding>)]) -> String {
 }
 
 pub fn write_detect_ensemble(runs: &[(u64, Vec<Finding>)], out_dir: &Path) -> io::Result<PathBuf> {
-    let mut csv = String::from("seed,gaze,limit,signal,with_limit,without_limit,detectable\n");
+    let mut csv = String::from(
+        "seed,gaze,limit,signal,with_limit,without_limit,detectable,anisotropy_with,anisotropy_without\n",
+    );
     for (seed, fs) in runs {
         for f in fs {
             let _ = writeln!(
                 csv,
-                "{seed},{},{},{},{:.6},{:.6},{}",
+                "{seed},{},{},{},{:.6},{:.6},{},{:.6},{:.6}",
                 f.gaze.label(),
                 f.limit,
                 f.signal,
                 f.with_value,
                 f.without_value,
-                f.detectable
+                f.detectable,
+                f.with.anisotropy(),
+                f.without.anisotropy()
             );
         }
     }

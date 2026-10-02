@@ -48,7 +48,8 @@ out otherwise, and the ensemble column says how often it did not.
 | The digest avalanches | `pipe` | follows from rules | A check that the fold is a hash. |
 | Two to six bits a tick keep 90% of what crosses | `pipe` | had to be run | Every seed in 2–6 bits; the curve dips at 3 bits in all of them. |
 | A child cannot learn that it is read | `pipe` | follows from rules | The type system has no method for it. |
-| Pixelation is invisible from inside | `detector` | follows from rules | The inhabitant measures in cells. Step 6 below tests a stronger detector. |
+| The lattice's scale is invisible from inside | `detector` | follows from rules | The inhabitant measures in cells, and a finer lattice has the same shape. |
+| The lattice's shape is visible from inside | `detector` | had to be run | √2 is the neighbourhood's geometry; that natural births expose it was measured, in 20/20 seeds. |
 | The speed of influence is findable, as an unfactorable product | `detector` | follows from rules | The measured reach is `radius × substeps` by construction. |
 | Looking conceals lazy rendering | `detector` | follows from rules | A probe forces rendering by definition, so a looking inhabitant only ever reads rendered cells. |
 | A passive reader can find lazy rendering | `detector` | had to be run | 12/20 seeds. |
@@ -58,7 +59,7 @@ out otherwise, and the ensemble column says how often it did not.
 | A chain can end for want of life with budget in hand | `bootloader` | had to be run | Depends on the floors in `[nesting]`. |
 | Same seed, same universe, on two targets | `golden` | had to be run | One fingerprint, asserted natively and on WebAssembly. |
 
-Of the 22 rows, 11 follow from the rules and 11 had to be run. The second half
+Of the 23 rows, 11 follow from the rules and 12 had to be run. The second half
 is what this repository has to offer. The first half is worth keeping because
 it shows the framework's ideas can be built at all, which is the coherence
 claim and nothing more.
@@ -117,7 +118,7 @@ under a second each. `configs/quick.toml` is a much smaller world for iterating
 on code — too short to draw conclusions from, and a single seed.
 
 ```sh
-cargo test --workspace              # 229 tests, most of them on the physics
+cargo test --workspace              # 235 tests, most of them on the physics
 cargo run --release -- --help
 ```
 
@@ -395,10 +396,37 @@ discrete_time      influence_speed      1.0000      2.0000         found
 lazy_rendering          smoothness      0.0002      0.0001     invisible
 ```
 
-**Pixelation leaves no fingerprint.** An inhabitant measures in cells because it
-is made of them, so subdividing space leaves its ruler exactly where it was. The
-smallest distinguishable separation is one unit in every universe, and always
-will be.
+**Pixelation's scale leaves no fingerprint. Its shape does.** An inhabitant
+measures in cells because it is made of them, so subdividing space leaves its
+ruler exactly where it was. The smallest distinguishable separation is one unit
+in every universe, and always will be.
+
+That was reported here as "pixelation is invisible", and it was a finding about
+a weak detector. Measure *direction* instead of size, by asking how far each
+newborn cell lies from its nearest live ancestor along a row or column versus a
+diagonal:
+
+```
+is space isotropic? influence reaches 1.00 cells along an axis and 1.41 on a
+diagonal: anisotropy 1.4142, against 1 for an isotropic continuum
+the shape of the lattice is visible from inside.
+a finer lattice reads 1.4142, the same shape, so the scale stays hidden.
+```
+
+A square neighbourhood reaches its corners √2 further than its edges, and
+natural births expose that in all 20 seeds. So an inhabitant can learn that its
+space has preferred directions, that it is a lattice and not a continuum,
+without learning how fine the lattice is: subdividing space gives a finer
+square lattice with the same √2. The model has no isotropic universe to
+compare against, so the 1 in that comparison is the geometry of a continuum,
+not a run.
+
+This is the one place the model touches a real experimental programme without
+overreaching. Searches for Lorentz violation look for exactly this kind of
+signature, a speed of light that depends on direction, and have found none to
+high precision. Within the model that would count against a square lattice at
+any scale those searches reach; it says nothing about whether space is
+discrete at all.
 
 **The speed of influence is measurable** — count how far new life appears from
 anything that was alive the tick before. But **that number is a product**,
@@ -418,9 +446,13 @@ principle.
 
 Across 20 seeds the concealment holds every time: an inhabitant whose looking
 renders finds lazy rendering in 0/20. The contrast is weaker than seed 42
-makes it look. A passive reader finds the limit in 12/20 seeds, because in the
-rest the coarse ground in reach happens to be smooth enough to pass. Pixelation
-stays invisible and the speed of influence stays findable in every seed.
+makes it look. A passive reader finds the limit in 12/20 seeds. In the other
+eight it still sees roughly 80 times more smooth ground with the limit than
+without, but under 1% of its region, which is below the detector's absolute
+floor of 0.01. That floor exists because 0.0002 against 0.0001 once passed as a
+detection (see below); here it costs the passive contrast eight seeds, and the
+floor stays. The lattice's scale stays invisible and the speed of influence
+stays findable in every seed.
 
 **Two guards this needed.** A relative-difference test alone called 0.0002
 against 0.0001 a fifty percent difference and reported a detection built

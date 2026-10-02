@@ -90,6 +90,28 @@ fn the_reading_never_exceeds_its_bound() {
 }
 
 #[test]
+fn the_shape_of_the_lattice_is_visible_from_inside() {
+    // Influence reaches one cell along an axis and sqrt(2) on a diagonal: the
+    // geometry of a square neighbourhood, read off natural births by an
+    // inhabitant who never sees the rule.
+    let c = cfg();
+    let findings = detector::investigate_all(&c, &who(&c), Gaze::Rendering);
+    let iso = detector::isotropy(&findings).expect("discrete_space must be surveyed");
+    assert!(iso.found, "a square lattice should not read as isotropic");
+    assert!((iso.lattice - std::f64::consts::SQRT_2).abs() < 1e-9);
+}
+
+#[test]
+fn the_scale_of_the_lattice_stays_hidden() {
+    // A finer lattice is still square, so its shape matches the coarse one.
+    // The inhabitant learns that space is a lattice, not how fine it is.
+    let c = cfg();
+    let findings = detector::investigate_all(&c, &who(&c), Gaze::Rendering);
+    let iso = detector::isotropy(&findings).unwrap();
+    assert!(!iso.separates_scale, "{iso:?}");
+}
+
+#[test]
 fn pixelation_leaves_no_fingerprint() {
     let c = cfg();
     let findings = detector::investigate_all(&c, &who(&c), Gaze::Rendering);
@@ -100,6 +122,10 @@ fn pixelation_leaves_no_fingerprint() {
     assert!(
         !space.detectable,
         "the cell is the ruler; subdividing space should leave it unchanged"
+    );
+    assert_eq!(
+        space.signal, "min_feature",
+        "anisotropy did not separate the two lattices, so the ruler stays the signal"
     );
 }
 

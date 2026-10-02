@@ -140,7 +140,7 @@ From v0.5:
 
 From v0.4:
 
-- Pixelation is undetectable from inside: the cell is the ruler.
+- Pixelation's *scale* is undetectable from inside: the cell is the ruler. Its *shape* is detectable: `Evidence::anisotropy` reads √2 (diagonal versus axis reach) in 20/20 seeds, against 1 for a continuum. A finer lattice reads √2 too, so scale stays hidden. Wider reach (radius 3, 2 substeps) undersamples corner-only births and reads noise; do not build a finding on it.
 - `influence_speed` measures `radius × substeps` and cannot factor it — the v0.1 coupling reappears as a limit on knowledge.
 - Lazy rendering is concealed by the act of measuring it. `Gaze::Rendering` vs `Gaze::Passive` shows this is a consequence of the framework's definition of a probe, not an artefact of where the inhabitant stands.
 - **Detections need an absolute floor, not just a relative one.** 0.0002 vs 0.0001 is a 50% relative gap and pure noise; it was reported as a finding until `MIN_ABSOLUTE` existed. Any new "is this different" test needs both.

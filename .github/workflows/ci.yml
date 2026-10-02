@@ -231,7 +231,7 @@ jobs:
       - name: Detection findings hold
         run: |
           python3 - <<'PY'
-          import csv, sys
+          import csv, json, sys
 
           rows = list(csv.DictReader(open("out/detect/detection.csv")))
           honest = [r for r in rows if r["gaze"] == "looking renders"]
@@ -245,9 +245,16 @@ jobs:
                   return None
               return hit[0]["detectable"] == "true"
 
-          # The cell is the ruler.
+          # The cell is the ruler: scale leaves no fingerprint...
           if verdict(honest, "discrete_space"):
               fail.append("discrete_space should leave no fingerprint")
+          # ...but shape does: a square lattice is not isotropic, and a finer
+          # square lattice has the same shape.
+          iso = json.load(open("out/detect/detection.json"))["isotropy"]
+          if not iso["found"] or abs(iso["lattice"] - 2 ** 0.5) > 1e-6:
+              fail.append(f"the lattice's shape should read sqrt(2): {iso}")
+          if iso["separates_scale"]:
+              fail.append("the lattice's scale should stay hidden")
           # The speed of influence is measurable.
           if not verdict(honest, "speed_cap"):
               fail.append("speed_cap should be findable from inside")
@@ -415,6 +422,10 @@ jobs:
               fail.append("detect: looking failed to conceal lazy rendering in some seed")
           if share("reads without rendering", "lazy_rendering") < 0.5:
               fail.append("detect: a passive reader found lazy rendering in under half the seeds")
+          shapes = [float(r["anisotropy_with"]) for r in csv.DictReader(open("out/detect/ensemble.csv"))
+                    if r["gaze"] == "looking renders" and r["limit"] == "discrete_space"]
+          if not all(abs(a - 2 ** 0.5) < 1e-6 for a in shapes):
+              fail.append("detect: the lattice's shape did not read sqrt(2) in every seed")
           print(f"detect: passive reader finds lazy rendering in "
                 f"{share('reads without rendering', 'lazy_rendering'):.0%} of seeds")
 

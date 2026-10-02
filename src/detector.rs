@@ -25,6 +25,12 @@
 //! - [`Evidence::min_feature`] — the smallest distinguishable separation, in
 //!   the inhabitant's own units. This one is expected to fail, and the reason
 //!   is the point of the module.
+//! - [`Evidence::anisotropy`] — how much further influence reaches along a
+//!   diagonal than along an axis. This one succeeds, and it limits what the
+//!   failure above means: the cell is the ruler, so an inhabitant cannot read
+//!   the lattice's *scale*, but a square neighbourhood reaches its corners
+//!   `sqrt(2)` further than its edges, so it can read the lattice's *shape*.
+//!   [`isotropy`] compares that against what a continuum would read.
 //!
 //! Falsified within the model if: a limit that leaves no fingerprint turns out
 //! to be detectable anyway, or one that should be plainly visible cannot be
@@ -129,6 +135,12 @@ pub struct Evidence {
     /// Smallest separation at which the inhabitant can tell two things apart,
     /// in its own units. Always 1: the cell is the ruler.
     pub min_feature: f64,
+    /// Greatest straight-line distance, in cells, from a newly live cell to
+    /// its nearest previously live one, among births whose nearest ancestor
+    /// lay along a row or column.
+    pub axis_reach: f64,
+    /// The same, among births whose nearest ancestor lay on a diagonal.
+    pub diagonal_reach: f64,
     /// How many ticks the inhabitant had anything to measure at all.
     pub samples: u64,
 }
@@ -169,6 +181,8 @@ pub fn investigate(
     };
 
     let mut max_reach = 0usize;
+    let mut axis = 0.0f64;
+    let mut diagonal = 0.0f64;
     let mut smooth = 0u64;
     let mut sampled = 0u64;
     let mut ticks_measured = 0u64;
@@ -193,6 +207,9 @@ pub fn investigate(
             max_reach = max_reach.max(r);
             ticks_measured += 1;
         }
+        let (a, d) = measure_directions(&observed, &advanced, &home);
+        axis = axis.max(a);
+        diagonal = diagonal.max(d);
 
         world = advanced;
     }
@@ -206,8 +223,90 @@ pub fn investigate(
         },
         // Measured, not assumed: see `min_feature_is_always_one`.
         min_feature: 1.0,
+        axis_reach: axis,
+        diagonal_reach: diagonal,
         samples: ticks_measured,
     }
+}
+
+impl Evidence {
+    /// How much further influence reaches along a diagonal than along an axis.
+    ///
+    /// 1 is what an isotropic continuum would show: no direction is special.
+    /// A square neighbourhood of any radius reaches its corners, which lie
+    /// `sqrt(2)` times further away than its edges, so a lattice built that
+    /// way reads about 1.41. `NaN` when either direction was never seen.
+    pub fn anisotropy(&self) -> f64 {
+        if self.axis_reach == 0.0 || self.diagonal_reach == 0.0 {
+            f64::NAN
+        } else {
+            self.diagonal_reach / self.axis_reach
+        }
+    }
+}
+
+/// Greatest axis and diagonal reach among this tick's births. Reads cells
+/// only, as every inhabitant measurement does.
+fn measure_directions(before: &World, after: &World, home: &[(usize, usize)]) -> (f64, f64) {
+    let geom = &after.geom;
+    let (mut axis, mut diagonal) = (0.0f64, 0.0f64);
+    for (x, y) in home {
+        let b = geom.block_of(*x, *y);
+        if !before.resolved[b] || !after.resolved[b] {
+            continue;
+        }
+        let idx = geom.idx(*x, *y);
+        if !(before.cells[idx] == 0 && after.cells[idx] == 1) {
+            continue;
+        }
+        if let Some((dx, dy)) = nearest_live_euclidean(before, *x, *y) {
+            let d = ((dx * dx + dy * dy) as f64).sqrt();
+            if dx == 0 || dy == 0 {
+                axis = axis.max(d);
+            } else if dx.abs() == dy.abs() {
+                diagonal = diagonal.max(d);
+            }
+        }
+    }
+    (axis, diagonal)
+}
+
+/// Displacement to the nearest previously live cell by straight-line distance.
+///
+/// Rings are searched outward in Chebyshev distance, which never exceeds the
+/// straight-line distance, so the search can stop once the next ring is
+/// further than the best found. As with [`nearest_live_before`], meeting
+/// coarse ground before the answer is settled makes the sample incomplete,
+/// and it is dropped rather than guessed.
+fn nearest_live_euclidean(before: &World, x: usize, y: usize) -> Option<(isize, isize)> {
+    let geom = &before.geom;
+    let mut best: Option<(isize, isize, isize)> = None;
+    for r in 1..=MAX_SEARCH as isize {
+        if let Some((_, _, d2)) = best
+            && r * r > d2
+        {
+            break;
+        }
+        for dy in -r..=r {
+            for dx in -r..=r {
+                if dx.abs() != r && dy.abs() != r {
+                    continue;
+                }
+                let nx = geom.wrap_x(x as isize + dx);
+                let ny = geom.wrap_y(y as isize + dy);
+                if !before.resolved[geom.block_of(nx, ny)] {
+                    return None;
+                }
+                if before.cells[geom.idx(nx, ny)] == 1 {
+                    let d2 = dx * dx + dy * dy;
+                    if best.is_none_or(|(_, _, b)| d2 < b) {
+                        best = Some((dx, dy, d2));
+                    }
+                }
+            }
+        }
+    }
+    best.map(|(dx, dy, _)| (dx, dy))
 }
 
 /// Whether a cell's 3x3 neighbourhood reads as one repeated non-empty number.
@@ -352,16 +451,28 @@ pub fn investigate_all(cfg: &Config, who: &Inhabitant, gaze: Gaze) -> Vec<Findin
             investigate(cfg, base, who, gaze),
             investigate(cfg, off, who, gaze),
         );
+        // Two candidate signals. The ruler cannot see scale; the shape of
+        // influence might separate a coarse lattice from a fine one. Use
+        // whichever does, and say which.
+        let by_shape = separated(w.anisotropy(), wo.anisotropy());
         out.push(Finding {
             limit: "discrete_space",
             with: w,
             without: wo,
-            signal: "min_feature",
-            with_value: w.min_feature,
-            without_value: wo.min_feature,
-            detectable: separated(w.min_feature, wo.min_feature),
+            signal: if by_shape { "anisotropy" } else { "min_feature" },
+            with_value: if by_shape {
+                w.anisotropy()
+            } else {
+                w.min_feature
+            },
+            without_value: if by_shape {
+                wo.anisotropy()
+            } else {
+                wo.min_feature
+            },
+            detectable: by_shape || separated(w.min_feature, wo.min_feature),
             gaze,
-            note: "the cell is the ruler, so pixelation measures the same either way",
+            note: "the cell is the ruler, and a finer lattice has the same shape, so scale cannot be read",
         });
     }
 
@@ -434,6 +545,41 @@ pub fn investigate_all(cfg: &Config, who: &Inhabitant, gaze: Gaze) -> Vec<Findin
     }
 
     out
+}
+
+/// What an isotropic continuum reads: no direction is special.
+pub const ISOTROPIC: f64 = 1.0;
+
+/// Whether space has preferred directions, judged from inside.
+///
+/// This is an absolute test, unlike the others: it compares one universe
+/// against what a continuum *would* read, not against a second universe. The
+/// model has no isotropic universe to run, so the comparison value is the
+/// geometry of one, not a measurement.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Isotropy {
+    /// Anisotropy with every limit in force.
+    pub lattice: f64,
+    /// Anisotropy with space subdivided: a finer lattice, not a continuum.
+    pub finer: f64,
+    /// The universe reads measurably unlike an isotropic continuum.
+    pub found: bool,
+    /// The coarse and fine lattices read measurably differently, so the
+    /// shape gives away the scale as well.
+    pub separates_scale: bool,
+}
+
+/// Read the isotropy test off the discrete-space finding, which already holds
+/// both universes' evidence.
+pub fn isotropy(findings: &[Finding]) -> Option<Isotropy> {
+    let f = findings.iter().find(|f| f.limit == "discrete_space")?;
+    let (lattice, finer) = (f.with.anisotropy(), f.without.anisotropy());
+    Some(Isotropy {
+        lattice,
+        finer,
+        found: lattice.is_finite() && separated(lattice, ISOTROPIC),
+        separates_scale: lattice.is_finite() && finer.is_finite() && separated(lattice, finer),
+    })
 }
 
 /// Two limits that move the same measurement, and whether anything else tells
@@ -706,5 +852,58 @@ mod tests {
         assert!(!separated(0.0002, 0.0001));
         assert!(!separated(0.0, 0.005));
         assert!(separated(0.02, 0.001));
+    }
+
+    fn blank() -> World {
+        World::seed(Geometry::new(16, 16, 1, 16), 1, 0.0)
+    }
+
+    #[test]
+    fn a_birth_beside_a_corner_reads_as_diagonal_reach() {
+        let (mut before, home) = (blank(), vec![(8usize, 8usize)]);
+        let i = before.geom.idx(9, 9);
+        before.cells[i] = 1;
+        let mut after = before.clone();
+        let c = after.geom.idx(8, 8);
+        after.cells[c] = 1;
+        let (axis, diagonal) = measure_directions(&before, &after, &home);
+        assert_eq!(axis, 0.0);
+        assert!((diagonal - std::f64::consts::SQRT_2).abs() < 1e-12);
+    }
+
+    #[test]
+    fn a_birth_beside_an_edge_reads_as_axis_reach() {
+        let (mut before, home) = (blank(), vec![(8usize, 8usize)]);
+        let i = before.geom.idx(8, 9);
+        before.cells[i] = 1;
+        let mut after = before.clone();
+        let c = after.geom.idx(8, 8);
+        after.cells[c] = 1;
+        assert_eq!(measure_directions(&before, &after, &home), (1.0, 0.0));
+    }
+
+    #[test]
+    fn the_nearest_ancestor_is_nearest_in_a_straight_line() {
+        // A corner at Chebyshev 1 is further than an edge at Chebyshev 1, so
+        // the edge cell is the nearest ancestor and the birth reads as axis.
+        let mut before = blank();
+        for (x, y) in [(9, 9), (7, 8)] {
+            let i = before.geom.idx(x, y);
+            before.cells[i] = 1;
+        }
+        assert_eq!(nearest_live_euclidean(&before, 8, 8), Some((-1, 0)));
+    }
+
+    #[test]
+    fn anisotropy_is_undefined_until_both_directions_are_seen() {
+        let e = Evidence {
+            influence_speed: 1.0,
+            smoothness: 0.0,
+            min_feature: 1.0,
+            axis_reach: 1.0,
+            diagonal_reach: 0.0,
+            samples: 1,
+        };
+        assert!(e.anisotropy().is_nan());
     }
 }

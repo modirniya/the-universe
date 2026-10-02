@@ -41,7 +41,9 @@ observer could trivially tell. See "Findings" in the README for what actually
 happened, including the one limit that turned out not to be free.
 
 **Can an inhabitant tell?** `detector` asks this, and the answer is partial.
-Pixelation is invisible because the cell is the ruler. The speed of influence is
+Pixelation's scale is invisible because the cell is the ruler, but its shape is
+not: influence reaches √2 further along a diagonal than along an axis, so an
+inhabitant can learn it lives on a lattice without learning how fine it is. The speed of influence is
 measurable but arrives as a product that cannot be factored, so an inhabitant
 can know it is constrained without learning how. Lazy rendering is concealed by
 the act of measuring it, since looking is what forces a region into full
