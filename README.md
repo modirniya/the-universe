@@ -63,20 +63,28 @@ cargo run --release -- sweep  --config configs/sweep.toml   # Theory 6: how narr
 cargo run --release -- boot   --config configs/boot.toml    # Theory 5: a chain booted from inside
 ```
 
-The `run` experiment takes about 11 seconds on an M1 Air; `nest` and `pipe`
-take under a second each. `configs/quick.toml`
-is a much smaller world for iterating on code — too short to draw conclusions
-from.
+**Every documented config runs an ensemble of 20 universes.** Seed 42 runs
+first, on its own, and is printed in full as the worked example. The other 19
+then run in parallel across all cores and are summarised beneath it as
+`mean [min, max]`. One seed is an example, not a finding: several of the
+numbers this README first reported from seed 42 alone turned out to be that
+seed's outliers, and are corrected below. Pass `--seeds 1` to run the pinned
+seed alone.
+
+One seed of `run` takes about 11 seconds on an M1 Air; `nest` and `pipe` take
+under a second each. `configs/quick.toml` is a much smaller world for iterating
+on code — too short to draw conclusions from, and a single seed.
 
 ```sh
-cargo test                          # 205 tests, most of them on the physics
+cargo test --workspace              # 220 tests, most of them on the physics
 cargo run --release -- --help
 ```
 
 ## Findings
 
-Reproduce with the quick-start command above. Everything below came from that
-command on an Apple M1, seed 42, 128×128 base cells, 200 ticks.
+Reproduce with the quick-start command above. The table below is the pinned
+seed, 42, on an Apple M1: 128×128 base cells, 200 ticks. The ensemble table
+after it is all 20 seeds.
 
 ```
 reference universe (no limits): 65536 cells, 1258291200 neighbour visits, 3454 ms
@@ -89,6 +97,22 @@ time         0.500x   0.498x   1.000x    0.07566      0.94x     0.01557
 speed        0.167x   0.193x   1.000x    0.16157      2.00x     0.15968
 lazy         0.250x   0.259x   0.257x    0.20672      2.56x     0.17935
 all_on       0.005x   0.009x   0.071x    0.27727      3.44x     0.09716
+```
+
+Across the ensemble, each limit judged against the chaos floor of its own seed.
+"Below" counts seeds where the limit diverged less than a change of seed did;
+"free" counts seeds where it was also cheap and no more than 1.25× the floor.
+
+```
+chaos floor across seeds: 0.08308 [0.07816, 0.09060]
+
+limit        work   memory  vs floor: mean [min, max]    below  <=1.25    free
+--------------------------------------------------------------------------------
+space      0.250x   0.257x  1.50 [1.31, 1.83]             0/20    0/20    0/20
+time       0.500x   1.000x  0.91 [0.83, 0.97]            20/20   20/20   20/20
+speed      0.167x   1.000x  1.95 [1.66, 2.18]             0/20    0/20    0/20
+lazy       0.250x   0.257x  2.65 [2.31, 3.15]             0/20    0/20    0/20
+all_on     0.005x   0.071x  2.85 [2.44, 3.47]             0/20    0/20    0/20
 ```
 
 **Read the divergence column against the floor, not against zero.** This world
@@ -106,13 +130,15 @@ in memory.** Theory 1's core claim survives contact with an implementation: the
 limits are enormously worth having. A creator would take this deal without
 thinking about it.
 
-**Discrete time is the free lunch.** It halves the cost and diverges *below*
-the chaos floor (0.94×) — that is, refining time changes the universe less than
-changing the seed does. If a creator wanted one limit that inhabitants could
-never detect, this is it.
+**Discrete time is the free lunch, in every seed.** It halves the cost and
+diverges *below* the chaos floor — 0.94× at seed 42, and below its own seed's
+floor in all 20 seeds of the ensemble, at 0.91× on average and never above
+0.97×. Refining time changes the universe less than changing the seed does. If
+a creator wanted one limit that inhabitants could never detect, this is it.
 
-**The other three are not free, and the model says so.** Lazy rendering is the
-most visible at 2.56× the floor, which stands to reason: mean-field
+**The other three are not free, and the model says so** — above the floor in
+all 20 seeds. Lazy rendering is the most visible at 2.56× the floor at seed 42
+(2.65× across the ensemble), which stands to reason: mean-field
 approximation of unobserved regions is a real loss of fidelity, and it shows up
 as a universe that holds substantially less structure (occupancy 0.05 against
 the reference's 0.22). Cheapness and invisibility are separate properties, and
@@ -172,12 +198,29 @@ without the chain eventually costing more than the parent.
 chain stopped at three, because the fourth world would have been smaller than
 one block. Two termination conditions exist and the spatial one bit first.
 
-**Degradation is visible as declining activity.** Churn — mean tick-to-tick
-change in the macro field — falls by an order of magnitude per layer. It is
-worth noting this runs *against* the measurement's own bias: churn is taken on
-a fixed 16×16 macro grid, so a smaller world averages over fewer cells and
-should look noisier, not calmer. The decline is real, and if anything
-understated.
+**Degradation is visible as declining activity, but not as cleanly as seed 42
+suggested.** Churn — mean tick-to-tick change in the macro field — falls by an
+order of magnitude per layer at seed 42. That seed turned out to have the
+liveliest root of all twenty, and the order of magnitude was its alone. Across
+the ensemble:
+
+```
+depth   seeds  churn: mean [min, max]
+----------------------------------------------
+    1      20  0.03374 [0.00969, 0.10835]
+    2      20  0.01187 [0.00532, 0.03823]
+    3      20  0.00755 [0.00339, 0.01402]
+
+the deepest layer was calmer than the root in 20/20 seeds, by 5.19 [1.12, 16.44]x
+churn fell at every step down the chain in 11/20 seeds
+```
+
+What survives is the coarse claim: the deepest layer is calmer than the root in
+every seed. The step-by-step decline does not, since in 9 seeds one layer was
+livelier than its host. This runs *against* the measurement's own bias — churn
+is taken on a fixed 16×16 macro grid, so a smaller world averages over fewer
+cells and should look noisier, not calmer — so the root-to-deepest decline is
+if anything understated.
 
 **Cost is not monotonic in world size.** A 48×48 layer costs 3,686,400 while a
 64×64 one costs 1,657,600. Lazy rendering charges by the block, and the probe
@@ -228,7 +271,8 @@ the digest's bits — the signature of a hash. No amount of comparing what came
 out recovers the arrangement that went in.
 
 **Timing and magnitude did.** What crossed tracks the child's global behaviour
-at 0.79, through a channel carrying 5.6% of the information. Theory 3's split
+at 0.79, through a channel carrying 5.6% of the information. Across 20 seeds the
+correlation is 0.82 [0.73, 0.90], and the avalanche 0.500 [0.493, 0.508]. Theory 3's split
 survives contact with an implementation: the pipe destroys the *what* while
 preserving the *when* and the *how much*.
 
@@ -297,6 +341,12 @@ without rendering. What hides this limit is not distance or subtlety. It is that
 observing without observing is a contradiction, so the limit is hidden in
 principle.
 
+Across 20 seeds the concealment holds every time: an inhabitant whose looking
+renders finds lazy rendering in 0/20. The contrast is weaker than seed 42
+makes it look. A passive reader finds the limit in 12/20 seeds, because in the
+rest the coarse ground in reach happens to be smooth enough to pass. Pixelation
+stays invisible and the speed of influence stays findable in every seed.
+
 **Two guards this needed.** A relative-difference test alone called 0.0002
 against 0.0001 a fifty percent difference and reported a detection built
 entirely from noise; detections now need an absolute floor as well. And an
@@ -338,10 +388,23 @@ cargo run --release -- sweep --config configs/sweep.toml --steps 21
 but those 441 settings denote only 42 distinct laws, of which 8 were productive
 ```
 
-**The productive band is a minority, not a sliver.** 19% of the laws this sweep
-can reach produce something complex. Fine-tuning holds here, but in a weaker
-form than the argument usually assumes — a creator picking blindly would find an
-interesting universe about one time in five.
+**The productive band is a minority, and seed 42 overstated it.** 19% of the
+laws this sweep can reach produce something complex at seed 42. That was the
+highest of twenty seeds:
+
+```
+productive share of distinct laws: 0.089 [0.024, 0.190]
+productive laws:                   3.8 [1.0, 8.0]
+distinct laws reachable:           42.0 [42.0, 42.0]
+Conway passed its own bar in 20/20 seeds
+```
+
+Fine-tuning holds, more strongly than the single seed suggested — a creator
+picking blindly would find an interesting universe about one time in eleven,
+and anywhere from one in five to one in forty depending on the universe the
+laws are tried in. The productivity of a law is not a property of the law
+alone; the same rule is complex from one initial condition and not from
+another.
 
 **Area is the resolution of the sweep; laws are the resolution of the
 universe.** 441 grid settings denote only 42 distinct rules, because a
@@ -398,8 +461,9 @@ optimizations of Theory 1. Neither end can see through the pipe, and the child
 is booted anyway.
 
 **Poorer layers produce less life.** Bootloaders fall 128 → 32 → 6 as the
-layers shrink. Degradation is not only a budget story; it thins out what a
-universe can grow.
+layers shrink at seed 42, and 113 → 28 → 6 on average across 20 seeds, never
+rising down a chain in any of them. Degradation is not only a budget story; it
+thins out what a universe can grow.
 
 **A chain can die of sterility rather than poverty.** With a permissive floor on
 size and budget, the chain runs one layer further and stops at a 6×6 universe

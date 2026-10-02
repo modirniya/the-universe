@@ -105,7 +105,8 @@ crossing (the digest tracking the arrangement instead of scattering), or timing
 and magnitude *not* surviving (a parent's view uncorrelated with the child's
 behaviour, meaning the pipe carries nothing at all). Neither happened: a
 one-cell change flips half the digest, while what crossed still tracks the child
-at 0.79 through a channel carrying 5.6% of the information.
+at 0.79 through a channel carrying 5.6% of the information (0.82 on average
+across twenty seeds).
 
 ---
 
@@ -199,9 +200,10 @@ spatially structured.
 
 **What would falsify it within the model:** complexity turning out to be common.
 The fine-tuning claim needs the productive band to be narrow, and a sweep
-finding most laws productive would refute it. The measured answer is 19% of the
-distinct laws reachable — a minority, but not the sliver the argument usually
-assumes. Two cautions travel with that number: the bar is calibrated from Conway
+finding most laws productive would refute it. The measured answer is 8.9% of the
+distinct laws reachable on average across twenty seeds, ranging from 2.4% to
+19% — a minority in every seed. Seed 42 alone gave the 19%, and was first
+reported as the answer. Two cautions travel with that number: the bar is calibrated from Conway
 and so measures resemblance rather than worth, and the productive fraction must
 be counted over *distinct laws* rather than grid area, since a neighbourhood of
 eight cells only admits densities k/8 and 441 settings collapse onto 42 laws.

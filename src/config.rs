@@ -45,6 +45,23 @@ pub struct WorldCfg {
     pub seed: u64,
     /// Fraction of cells alive at the input event.
     pub init_density: f64,
+    /// How many universes an ensemble runs. Seed `i` is
+    /// `seed + i * seed_stride`, so the first is always the pinned seed above.
+    /// One seed is an example; a finding needs several.
+    #[serde(default = "one")]
+    pub seeds: usize,
+    /// Distance between ensemble seeds. Must exceed 1, because the Theory 1
+    /// control runs at `seed + 1` and must not coincide with the next member.
+    #[serde(default = "default_stride")]
+    pub seed_stride: u64,
+}
+
+fn one() -> usize {
+    1
+}
+
+fn default_stride() -> u64 {
+    1000
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -107,6 +124,16 @@ impl Config {
         }
         if self.world.ticks == 0 {
             return bad("world.ticks must be greater than 0".into());
+        }
+        if self.world.seeds == 0 {
+            return bad("world.seeds must be at least 1".into());
+        }
+        if self.world.seeds > 1 && self.world.seed_stride < 2 {
+            return bad(
+                "world.seed_stride must be at least 2: the control runs at seed + 1 and \
+                 would coincide with the next member of the ensemble"
+                    .into(),
+            );
         }
         if !(0.0..=1.0).contains(&self.world.init_density) {
             return bad(format!(
@@ -198,6 +225,21 @@ height = 8
     fn unknown_fields_are_rejected() {
         let s = MINIMAL.replace("[world]", "[world]\nwidht = 32");
         assert!(matches!(parse(&s), Err(ConfigError::Parse(_))));
+    }
+
+    #[test]
+    fn an_ensemble_defaults_to_the_pinned_seed_alone() {
+        let cfg = parse(MINIMAL).expect("minimal config should load");
+        assert_eq!(cfg.world.seeds, 1);
+        assert_eq!(cfg.world.seed_stride, 1000);
+    }
+
+    #[test]
+    fn an_ensemble_whose_members_would_collide_with_the_control_is_refused() {
+        let s = MINIMAL.replace("seed = 1", "seed = 1\nseeds = 4\nseed_stride = 1");
+        assert!(matches!(parse(&s), Err(ConfigError::Invalid(_))));
+        let s = MINIMAL.replace("seed = 1", "seed = 1\nseeds = 0");
+        assert!(matches!(parse(&s), Err(ConfigError::Invalid(_))));
     }
 
     #[test]

@@ -63,6 +63,10 @@ jobs:
       # command and checks the reproducible part of what the README says about
       # it. Wall time is deliberately not asserted on -- it is a measurement,
       # not a counter, and a shared CI runner is the worst place to measure it.
+      #
+      # Every documented config runs a 20-seed ensemble. The pinned seed's
+      # artifacts are checked as before; the ensemble checks below assert on
+      # shares of seeds, because one seed is an example and not a finding.
       - name: Run the documented experiment
         run: cargo run --release -- run --config configs/default.toml
 
@@ -89,6 +93,8 @@ jobs:
           test -s out/detect/detection.csv && test -s out/detect/detection.json
           test -s out/sweep/sweep.csv && test -s out/sweep/sweep.json
           test -s out/boot/boot.csv && test -s out/boot/boot.json
+          test -s out/ensemble.csv && test -s out/ensemble.json
+          for d in nesting pipe detect sweep boot; do test -s out/$d/ensemble.csv; done
 
       - name: Constraints reduce work, and the control is non-degenerate
         run: |
@@ -329,6 +335,100 @@ jobs:
               print("\nFAILED:", *fail, sep="\n  ")
               sys.exit(1)
           print("\nbootloader claims hold")
+          PY
+
+      - name: Findings hold across seeds, not just at seed 42
+        run: |
+          python3 - <<'PY'
+          import csv, json, sys
+          from collections import defaultdict
+
+          fail = []
+
+          # Theory 1. Discrete time is below its own seed's chaos floor in
+          # (nearly) every seed; the other single limits are above it in
+          # (nearly) every seed.
+          d = json.load(open("out/ensemble.json"))
+          n = len(d["seeds"])
+          if n < 20:
+              fail.append(f"run: expected a 20-seed ensemble, got {n}")
+          lim = {l["label"]: l for l in d["limits"]}
+          if lim["time"]["below_floor"] < 0.9 * n:
+              fail.append(f"time below the floor in only {lim['time']['below_floor']}/{n} seeds")
+          for label in ("space", "speed", "lazy"):
+              if lim[label]["unnoticeable"] > 0.1 * n:
+                  fail.append(f"{label} hid under the floor in {lim[label]['unnoticeable']}/{n} seeds")
+          if lim["all_on"]["work_ratio"]["max"] > 0.05:
+              fail.append("all_on lost the ~190x saving in some seed")
+          print(f"run: time below floor {lim['time']['below_floor']}/{n}, "
+                f"vs floor {lim['time']['vs_floor']['mean']:.2f}")
+
+          # Theory 2. The deepest layer is calmer than the root in every seed.
+          chains = defaultdict(dict)
+          for r in csv.DictReader(open("out/nesting/ensemble.csv")):
+              chains[r["seed"]][int(r["depth"])] = float(r["churn"])
+          calmer = sum(1 for c in chains.values() if c[max(c)] < c[min(c)])
+          if calmer < len(chains):
+              fail.append(f"nest: deepest layer calmer than root in only {calmer}/{len(chains)}")
+          print(f"nest: deepest calmer than root in {calmer}/{len(chains)}")
+
+          # Theory 3. The hash avalanches and the magnitude tracks the child
+          # in every seed.
+          pipes = list(csv.DictReader(open("out/pipe/ensemble.csv")))
+          lo = min(float(r["magnitude_correlation"]) for r in pipes)
+          av = [float(r["content_avalanche"]) for r in pipes]
+          if lo < 0.5:
+              fail.append(f"pipe: magnitude correlation fell to {lo:.3f} in some seed")
+          if not all(0.45 <= a <= 0.55 for a in av):
+              fail.append("pipe: avalanche left [0.45, 0.55] in some seed")
+          print(f"pipe: worst correlation {lo:.3f} over {len(pipes)} seeds")
+
+          # Detection. Per gaze and limit, the share of seeds where it was found.
+          found = defaultdict(lambda: [0, 0])
+          for r in csv.DictReader(open("out/detect/ensemble.csv")):
+              k = (r["gaze"], r["limit"])
+              found[k][0] += r["detectable"] == "true"
+              found[k][1] += 1
+          def share(gaze, limit):
+              f, t = found[(gaze, limit)]
+              return f / t if t else float("nan")
+          if share("looking renders", "discrete_space") > 0:
+              fail.append("detect: discrete_space was found in some seed")
+          if share("looking renders", "speed_cap") < 1:
+              fail.append("detect: speed_cap was missed in some seed")
+          if share("looking renders", "lazy_rendering") > 0:
+              fail.append("detect: looking failed to conceal lazy rendering in some seed")
+          if share("reads without rendering", "lazy_rendering") < 0.5:
+              fail.append("detect: a passive reader found lazy rendering in under half the seeds")
+          print(f"detect: passive reader finds lazy rendering in "
+                f"{share('reads without rendering', 'lazy_rendering'):.0%} of seeds")
+
+          # Theory 6. Conway passes its own bar everywhere; the productive
+          # share stays a minority in every seed.
+          sweeps = list(csv.DictReader(open("out/sweep/ensemble.csv")))
+          if not all(r["reference_admitted"] == "true" for r in sweeps):
+              fail.append("sweep: Conway failed its own bar in some seed")
+          hi = max(float(r["productive_rule_fraction"]) for r in sweeps)
+          if not 0.0 < hi < 0.5:
+              fail.append(f"sweep: productive share reached {hi:.3f}")
+          print(f"sweep: highest productive share {hi:.3f} over {len(sweeps)} seeds")
+
+          # Theory 5. Bootloaders never rise down a chain, in any seed.
+          boots = defaultdict(dict)
+          for r in csv.DictReader(open("out/boot/ensemble.csv")):
+              boots[r["seed"]][int(r["depth"])] = int(r["bootloaders"])
+          for seed, b in boots.items():
+              depths = sorted(b)
+              if len(depths) < 2:
+                  fail.append(f"boot: seed {seed} reached only depth {len(depths)}")
+              if any(b[y] > b[x] for x, y in zip(depths, depths[1:])):
+                  fail.append(f"boot: bootloaders rose down the chain at seed {seed}")
+          print(f"boot: {len(boots)} chains checked")
+
+          if fail:
+              print("\nFAILED:", *fail, sep="\n  ")
+              sys.exit(1)
+          print("\nthe ensemble findings hold")
           PY
 
   wasm:

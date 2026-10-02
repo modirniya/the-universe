@@ -26,6 +26,8 @@ use crate::constraints::{Constraints, Resolved};
 use crate::observer::observe;
 use crate::physics::{Work, tick};
 use crate::space::{Geometry, World, macro_divergence};
+use std::sync::Mutex;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Instant;
 
 /// Everything one universe did, and what it cost.
@@ -232,6 +234,201 @@ pub fn run_all(cfg: &Config, mut on_run: impl FnMut(&str)) -> Experiment {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Ensembles: one seed is an example, not a finding
+// ---------------------------------------------------------------------------
+
+/// The seeds an ensemble runs, in order. The first is always the config's own
+/// seed, so the pinned example is a member of every ensemble built from it.
+pub fn ensemble_seeds(cfg: &Config) -> Vec<u64> {
+    (0..cfg.world.seeds as u64)
+        .map(|i| {
+            cfg.world
+                .seed
+                .wrapping_add(i.wrapping_mul(cfg.world.seed_stride))
+        })
+        .collect()
+}
+
+/// Run `f` once per ensemble seed and return the results in seed order.
+///
+/// The pinned seed runs alone, before anything else starts, so the wall time
+/// it reports is measured on a quiet machine. The rest run in parallel, one
+/// thread per core. Every counter is unaffected by that, because each universe
+/// is computed from its own seed alone and the results are placed by index,
+/// never by completion order. Wall time from those parallel members is not
+/// honest and must not be reported.
+pub fn per_seed<T: Send>(cfg: &Config, f: impl Fn(&Config) -> T + Sync) -> Vec<(u64, T)> {
+    let seeds = ensemble_seeds(cfg);
+    let with = |seed: u64| {
+        let mut c = cfg.clone();
+        c.world.seed = seed;
+        c
+    };
+
+    let mut out = Vec::with_capacity(seeds.len());
+    out.push((seeds[0], f(&with(seeds[0]))));
+
+    let rest = &seeds[1..];
+    if rest.is_empty() {
+        return out;
+    }
+    let jobs = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(1)
+        .min(rest.len());
+    let next = AtomicUsize::new(0);
+    let slots: Vec<Mutex<Option<T>>> = rest.iter().map(|_| Mutex::new(None)).collect();
+    std::thread::scope(|scope| {
+        for _ in 0..jobs {
+            scope.spawn(|| {
+                loop {
+                    let i = next.fetch_add(1, Ordering::Relaxed);
+                    if i >= rest.len() {
+                        break;
+                    }
+                    let r = f(&with(rest[i]));
+                    *slots[i].lock().expect("a worker panicked") = Some(r);
+                }
+            });
+        }
+    });
+    out.extend(rest.iter().zip(slots).map(|(seed, slot)| {
+        let r = slot
+            .into_inner()
+            .expect("a worker panicked")
+            .expect("every seed was run");
+        (*seed, r)
+    }));
+    out
+}
+
+/// Mean, minimum and maximum of one quantity across an ensemble.
+///
+/// Non-finite values are left out and not counted, so `n` says how many
+/// members the summary actually rests on.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Spread {
+    pub mean: f64,
+    pub min: f64,
+    pub max: f64,
+    pub n: usize,
+}
+
+impl Spread {
+    pub fn of(values: impl IntoIterator<Item = f64>) -> Spread {
+        let mut n = 0usize;
+        let mut sum = 0.0;
+        let mut min = f64::INFINITY;
+        let mut max = f64::NEG_INFINITY;
+        for v in values.into_iter().filter(|v| v.is_finite()) {
+            n += 1;
+            sum += v;
+            min = min.min(v);
+            max = max.max(v);
+        }
+        if n == 0 {
+            return Spread {
+                mean: f64::NAN,
+                min: f64::NAN,
+                max: f64::NAN,
+                n,
+            };
+        }
+        Spread {
+            // `+ 0.0` normalises the -0.0 an empty-ish float fold can produce.
+            mean: sum / n as f64 + 0.0,
+            min: min + 0.0,
+            max: max + 0.0,
+            n,
+        }
+    }
+}
+
+/// Theory 1 run once per seed.
+#[derive(Clone, Debug)]
+pub struct Ensemble {
+    /// One experiment per seed, pinned seed first. Traces are dropped: the
+    /// ensemble keeps what was computed from them, not the fields themselves.
+    pub runs: Vec<(u64, Experiment)>,
+}
+
+impl Ensemble {
+    /// Labels of the compared settings, in the order every member ran them.
+    pub fn labels(&self) -> Vec<String> {
+        self.runs
+            .first()
+            .map(|(_, e)| e.comparisons.iter().map(|c| c.run.label.clone()).collect())
+            .unwrap_or_default()
+    }
+
+    fn values<'a>(
+        &'a self,
+        label: &'a str,
+        f: impl Fn(&Comparison, &Experiment) -> f64 + 'a,
+    ) -> impl Iterator<Item = f64> + 'a {
+        self.runs.iter().filter_map(move |(_, e)| {
+            e.comparisons
+                .iter()
+                .find(|c| c.run.label == label)
+                .map(|c| f(c, e))
+        })
+    }
+
+    /// One quantity of one setting, summarised across seeds.
+    pub fn spread(&self, label: &str, f: impl Fn(&Comparison, &Experiment) -> f64) -> Spread {
+        Spread::of(self.values(label, f))
+    }
+
+    /// How many seeds satisfy a condition on one setting.
+    pub fn count(&self, label: &str, pred: impl Fn(&Comparison, &Experiment) -> bool) -> usize {
+        self.values(label, move |c, e| f64::from(u8::from(pred(c, e))))
+            .filter(|v| *v > 0.0)
+            .count()
+    }
+
+    /// The chaos floor itself, as a distribution rather than one pair.
+    pub fn floor(&self) -> Spread {
+        Spread::of(self.runs.iter().map(|(_, e)| e.chaos_floor))
+    }
+
+    pub fn len(&self) -> usize {
+        self.runs.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.runs.is_empty()
+    }
+}
+
+/// Divergence of one comparison as a multiple of its own seed's chaos floor.
+pub fn vs_floor(c: &Comparison, e: &Experiment) -> f64 {
+    if e.chaos_floor == 0.0 {
+        f64::NAN
+    } else {
+        c.mean_divergence / e.chaos_floor
+    }
+}
+
+/// Run the whole Theory 1 experiment once per ensemble seed.
+///
+/// Each member carries its own control, so each limit is judged against the
+/// floor of the universe it actually ran in.
+pub fn run_ensemble(cfg: &Config, on_seed: impl Fn(u64) + Sync) -> Ensemble {
+    let runs = per_seed(cfg, |c| {
+        on_seed(c.world.seed);
+        let mut e = run_all(c, |_| {});
+        e.reference.macro_trace = Vec::new();
+        e.reference.live_trace = Vec::new();
+        for comp in &mut e.comparisons {
+            comp.run.macro_trace = Vec::new();
+            comp.run.live_trace = Vec::new();
+        }
+        e
+    });
+    Ensemble { runs }
+}
+
 fn ratio(a: f64, b: f64) -> f64 {
     if b == 0.0 { f64::NAN } else { a / b }
 }
@@ -253,6 +450,8 @@ mod tests {
                 ticks: 12,
                 seed: 5,
                 init_density: 0.3,
+                seeds: 1,
+                seed_stride: 1000,
             },
             rules: Rules::default(),
             constraints: Constraints::ALL_ON,
@@ -369,6 +568,70 @@ mod tests {
         // how much structure they hold; that is the point of `live_delta`.
         let e = run_all(&cfg(), |_| {});
         assert!(e.chaos_floor_live <= e.chaos_floor + 1e-9);
+    }
+
+    #[test]
+    fn ensemble_seeds_start_at_the_pinned_seed_and_step_by_the_stride() {
+        let mut c = cfg();
+        c.world.seeds = 4;
+        c.world.seed_stride = 1000;
+        assert_eq!(ensemble_seeds(&c), vec![5, 1005, 2005, 3005]);
+    }
+
+    #[test]
+    fn per_seed_places_results_by_seed_not_by_completion() {
+        // More seeds than cores, so several workers race for them. The order
+        // that comes back must be the seed order regardless.
+        let mut c = cfg();
+        c.world.seeds = 17;
+        let got = per_seed(&c, |c| c.world.seed * 3);
+        let seeds = ensemble_seeds(&c);
+        assert_eq!(got.len(), 17);
+        for ((s, v), want) in got.iter().zip(&seeds) {
+            assert_eq!(s, want);
+            assert_eq!(*v, want * 3);
+        }
+    }
+
+    #[test]
+    fn an_ensemble_is_reproducible_across_thread_schedules() {
+        let mut c = cfg();
+        c.world.seeds = 5;
+        let a = run_ensemble(&c, |_| {});
+        let b = run_ensemble(&c, |_| {});
+        for ((sa, ea), (sb, eb)) in a.runs.iter().zip(&b.runs) {
+            assert_eq!(sa, sb);
+            assert_eq!(ea.chaos_floor, eb.chaos_floor);
+            for (x, y) in ea.comparisons.iter().zip(&eb.comparisons) {
+                assert_eq!(x.mean_divergence, y.mean_divergence);
+                assert_eq!(x.run.work, y.run.work);
+            }
+        }
+    }
+
+    #[test]
+    fn an_ensemble_of_one_is_the_pinned_run() {
+        let single = run_all(&cfg(), |_| {});
+        let ens = run_ensemble(&cfg(), |_| {});
+        assert_eq!(ens.len(), 1);
+        let (seed, e) = &ens.runs[0];
+        assert_eq!(*seed, cfg().world.seed);
+        assert_eq!(e.chaos_floor, single.chaos_floor);
+        for (x, y) in e.comparisons.iter().zip(&single.comparisons) {
+            assert_eq!(x.work_ratio, y.work_ratio);
+            assert_eq!(x.mean_divergence, y.mean_divergence);
+        }
+    }
+
+    #[test]
+    fn a_spread_ignores_what_is_not_a_number_and_says_so() {
+        let sp = Spread::of([1.0, f64::NAN, 3.0, 2.0]);
+        assert_eq!(sp.n, 3);
+        assert_eq!((sp.min, sp.max), (1.0, 3.0));
+        assert!((sp.mean - 2.0).abs() < 1e-12);
+        let empty = Spread::of([f64::NAN]);
+        assert_eq!(empty.n, 0);
+        assert!(empty.mean.is_nan());
     }
 
     #[test]

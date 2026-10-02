@@ -9,6 +9,8 @@ width = 128
 height = 128
 ticks = 300
 seed = 42
+seeds = 20           # an ensemble: seed 42 is the pinned example, 19 more make it a finding
+seed_stride = 1000   # seeds 42, 1042, 2042, ...; must exceed 1, the control runs at seed + 1
 init_density = 0.30
 
 [params]

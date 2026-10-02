@@ -11,9 +11,9 @@
 //! output format is part of the claim, so it is worth being able to read the
 //! code that produces it.
 
-use crate::bootloader::BootChain;
+use crate::bootloader::{BootChain, BootLayer};
 use crate::detector::Finding;
-use crate::experiment::{Comparison, Experiment};
+use crate::experiment::{self, Comparison, Ensemble, Experiment, Spread};
 use crate::layer::Chain;
 use crate::pipe::{self, Horizon, Relay};
 use crate::sweep::{self, Sweep};
@@ -277,6 +277,219 @@ fn verdict(exp: &Experiment) -> String {
         s.push_str("no limit was both cheap and invisible at this threshold\n");
     }
 
+    s.push_str(
+        "\nthis says the limits are coherent as optimizations inside this model. \
+         it says nothing about whether our universe works this way.\n",
+    );
+    s
+}
+
+// ---------------------------------------------------------------------------
+// Theory 1 across seeds
+// ---------------------------------------------------------------------------
+
+/// `mean [min, max]`, the one way a spread is printed anywhere in a report.
+pub fn spread_cell(sp: &Spread, digits: usize) -> String {
+    if sp.n == 0 {
+        return "n/a".to_string();
+    }
+    format!(
+        "{:.d$} [{:.d$}, {:.d$}]",
+        sp.mean,
+        sp.min,
+        sp.max,
+        d = digits
+    )
+}
+
+/// One spread as a JSON object.
+pub fn spread_json(sp: &Spread) -> String {
+    format!(
+        "{{\"mean\": {}, \"min\": {}, \"max\": {}, \"n\": {}}}",
+        json_f64(sp.mean),
+        json_f64(sp.min),
+        json_f64(sp.max),
+        sp.n
+    )
+}
+
+fn json_f64(v: f64) -> String {
+    if v.is_finite() {
+        format!("{v:.6}")
+    } else {
+        "null".to_string()
+    }
+}
+
+/// Seeds an ensemble ran, as printed in every ensemble header.
+pub fn seed_list(seeds: &[u64]) -> String {
+    match seeds {
+        [] => String::new(),
+        [only] => only.to_string(),
+        [first, .., last] => format!("{first}, ..., {last}"),
+    }
+}
+
+const ENSEMBLE_COLUMNS: &[&str] = &[
+    "seed",
+    "label",
+    "work_ratio",
+    "memory_ratio",
+    "mean_divergence",
+    "chaos_floor",
+    "vs_floor",
+    "live_delta",
+    "chaos_floor_live",
+];
+
+pub fn ensemble_to_csv(ens: &Ensemble) -> String {
+    let mut s = ENSEMBLE_COLUMNS.join(",");
+    s.push('\n');
+    for (seed, e) in &ens.runs {
+        for c in &e.comparisons {
+            let _ = writeln!(
+                s,
+                "{seed},{},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6}",
+                c.run.label,
+                c.work_ratio,
+                c.memory_ratio,
+                c.mean_divergence,
+                e.chaos_floor,
+                experiment::vs_floor(c, e),
+                c.live_delta,
+                e.chaos_floor_live,
+            );
+        }
+    }
+    s
+}
+
+pub fn ensemble_to_json(ens: &Ensemble) -> String {
+    let n = ens.len();
+    let seeds: Vec<String> = ens.runs.iter().map(|(s, _)| s.to_string()).collect();
+    let mut s = String::from("{\n");
+    let _ = writeln!(s, "  \"seeds\": [{}],", seeds.join(", "));
+    let _ = writeln!(s, "  \"chaos_floor\": {},", spread_json(&ens.floor()));
+    s.push_str("  \"limits\": [\n");
+    let labels = ens.labels();
+    for (i, label) in labels.iter().enumerate() {
+        let _ = write!(
+            s,
+            "    {{\"label\": \"{label}\", \"work_ratio\": {}, \"memory_ratio\": {}, \
+             \"mean_divergence\": {}, \"vs_floor\": {}, \"live_delta\": {}, \
+             \"below_floor\": {}, \"unnoticeable\": {}, \"free\": {}, \"seeds\": {n}}}",
+            spread_json(&ens.spread(label, |c, _| c.work_ratio)),
+            spread_json(&ens.spread(label, |c, _| c.memory_ratio)),
+            spread_json(&ens.spread(label, |c, _| c.mean_divergence)),
+            spread_json(&ens.spread(label, experiment::vs_floor)),
+            spread_json(&ens.spread(label, |c, _| c.live_delta)),
+            ens.count(label, |c, e| experiment::vs_floor(c, e) <= 1.0),
+            ens.count(label, |c, e| experiment::vs_floor(c, e) <= NOTICEABLE),
+            ens.count(label, is_free),
+        );
+        if i + 1 < labels.len() {
+            s.push(',');
+        }
+        s.push('\n');
+    }
+    s.push_str("  ]\n}\n");
+    s
+}
+
+pub fn write_ensemble(ens: &Ensemble, out_dir: &Path) -> io::Result<Written> {
+    std::fs::create_dir_all(out_dir)?;
+    let csv = out_dir.join("ensemble.csv");
+    let json = out_dir.join("ensemble.json");
+    std::fs::write(&csv, ensemble_to_csv(ens))?;
+    std::fs::write(&json, ensemble_to_json(ens))?;
+    Ok(Written { csv, json })
+}
+
+/// The same rule [`verdict`] applies to one seed: cheap, and no more visible
+/// than a change of seed.
+fn is_free(c: &Comparison, e: &Experiment) -> bool {
+    c.work_ratio < CHEAP && experiment::vs_floor(c, e) <= NOTICEABLE
+}
+
+/// Theory 1 across seeds. Wall time is absent on purpose: all but the pinned
+/// seed ran in parallel, so their clocks measured contention, not cost.
+pub fn ensemble_summary(ens: &Ensemble) -> String {
+    let mut s = String::new();
+    let n = ens.len();
+    let seeds: Vec<u64> = ens.runs.iter().map(|(s, _)| *s).collect();
+    let _ = writeln!(s, "ensemble: {n} seeds ({})", seed_list(&seeds));
+    let _ = writeln!(
+        s,
+        "chaos floor across seeds: {}",
+        spread_cell(&ens.floor(), 5)
+    );
+    let _ = writeln!(
+        s,
+        "each limit is judged against the floor of its own seed. wall time is not shown:\n\
+         every seed after the first ran in parallel, so its clock measured contention.\n"
+    );
+    let _ = writeln!(
+        s,
+        "{:<8} {:>8} {:>8}  {:<26} {:>7} {:>7} {:>7}",
+        "limit", "work", "memory", "vs floor: mean [min, max]", "below", "<=1.25", "free"
+    );
+    let _ = writeln!(s, "{}", "-".repeat(80));
+    for label in ens.labels() {
+        let _ = writeln!(
+            s,
+            "{:<8} {:>7.3}x {:>7.3}x  {:<26} {:>7} {:>7} {:>7}",
+            label,
+            ens.spread(&label, |c, _| c.work_ratio).mean,
+            ens.spread(&label, |c, _| c.memory_ratio).mean,
+            spread_cell(&ens.spread(&label, experiment::vs_floor), 2),
+            format!(
+                "{}/{n}",
+                ens.count(&label, |c, e| experiment::vs_floor(c, e) <= 1.0)
+            ),
+            format!(
+                "{}/{n}",
+                ens.count(&label, |c, e| experiment::vs_floor(c, e) <= NOTICEABLE)
+            ),
+            format!("{}/{n}", ens.count(&label, is_free)),
+        );
+    }
+    s.push('\n');
+    s.push_str(&ensemble_verdict(ens));
+    s
+}
+
+fn ensemble_verdict(ens: &Ensemble) -> String {
+    let mut s = String::new();
+    let n = ens.len();
+    let mut always = Vec::new();
+    let mut sometimes = Vec::new();
+    let mut never = Vec::new();
+    for label in ens.labels() {
+        if label == "all_on" {
+            continue;
+        }
+        let k = ens.count(&label, is_free);
+        if k == n {
+            always.push(label);
+        } else if k > 0 {
+            sometimes.push(format!("{label} ({k}/{n})"));
+        } else {
+            never.push(label);
+        }
+    }
+    if !always.is_empty() {
+        let _ = writeln!(s, "free in every seed: {}", always.join(", "));
+    }
+    if !sometimes.is_empty() {
+        let _ = writeln!(
+            s,
+            "free in some seeds only, so not a stable finding: {}",
+            sometimes.join(", ")
+        );
+    }
+    if !never.is_empty() {
+        let _ = writeln!(s, "free in no seed: {}", never.join(", "));
+    }
     s.push_str(
         "\nthis says the limits are coherent as optimizations inside this model. \
          it says nothing about whether our universe works this way.\n",
@@ -1237,6 +1450,355 @@ fn boot_verdict(chain: &BootChain) -> String {
     s
 }
 
+// ---------------------------------------------------------------------------
+// The other experiments across seeds
+// ---------------------------------------------------------------------------
+//
+// Each takes the per-seed results in seed order, pinned seed first, and writes
+// one row per seed to `ensemble.csv` beside that experiment's own files. Every
+// summary reports spreads, never a lone value, and ends by declining to
+// overstate what an ensemble of a toy shows.
+
+const ENSEMBLE_CLOSER: &str = "\nmore seeds make this a finding about the model rather than about one universe in \
+it. they say nothing about whether our universe works this way.\n";
+
+fn ensemble_header(s: &mut String, seeds: &[u64]) {
+    let _ = writeln!(s, "ensemble: {} seeds ({})", seeds.len(), seed_list(seeds));
+}
+
+fn write_rows(out_dir: &Path, csv: String) -> io::Result<PathBuf> {
+    std::fs::create_dir_all(out_dir)?;
+    let path = out_dir.join("ensemble.csv");
+    std::fs::write(&path, csv)?;
+    Ok(path)
+}
+
+/// Whether churn fell at every step down a chain.
+fn churn_falls(chain: &Chain) -> bool {
+    chain.layers.windows(2).all(|w| w[1].churn < w[0].churn)
+}
+
+pub fn chain_ensemble_summary(runs: &[(u64, Chain)]) -> String {
+    let mut s = String::new();
+    let seeds: Vec<u64> = runs.iter().map(|(s, _)| *s).collect();
+    let n = runs.len();
+    ensemble_header(&mut s, &seeds);
+    let _ = writeln!(
+        s,
+        "depth built: {}",
+        spread_cell(
+            &Spread::of(runs.iter().map(|(_, c)| c.layers.len() as f64)),
+            2
+        )
+    );
+    let deepest = runs.iter().map(|(_, c)| c.layers.len()).max().unwrap_or(0);
+    let _ = writeln!(
+        s,
+        "\n{:>5}  {:>6}  {:<30}",
+        "depth", "seeds", "churn: mean [min, max]"
+    );
+    let _ = writeln!(s, "{}", "-".repeat(46));
+    for d in 0..deepest {
+        let sp = Spread::of(
+            runs.iter()
+                .filter_map(|(_, c)| c.layers.get(d).map(|l| l.churn)),
+        );
+        let _ = writeln!(s, "{:>5}  {:>6}  {:<30}", d + 1, sp.n, spread_cell(&sp, 5));
+    }
+    let falls = runs.iter().filter(|(_, c)| churn_falls(c)).count();
+    let calmer = runs
+        .iter()
+        .filter(|(_, c)| match (c.layers.first(), c.layers.last()) {
+            (Some(a), Some(b)) => c.layers.len() > 1 && b.churn < a.churn,
+            _ => false,
+        })
+        .count();
+    let ratio =
+        Spread::of(
+            runs.iter()
+                .filter_map(|(_, c)| match (c.layers.first(), c.layers.last()) {
+                    (Some(a), Some(b)) if c.layers.len() > 1 && b.churn > 0.0 => {
+                        Some(a.churn / b.churn)
+                    }
+                    _ => None,
+                }),
+        );
+    let _ = writeln!(
+        s,
+        "\nthe deepest layer was calmer than the root in {calmer}/{n} seeds, by {}x",
+        spread_cell(&ratio, 2)
+    );
+    let _ = writeln!(
+        s,
+        "churn fell at every step down the chain in {falls}/{n} seeds"
+    );
+    s.push_str(ENSEMBLE_CLOSER);
+    s
+}
+
+pub fn write_chain_ensemble(runs: &[(u64, Chain)], out_dir: &Path) -> io::Result<PathBuf> {
+    let mut csv = String::from("seed,depth,width,height,budget_work,spent_work,churn,sterile\n");
+    for (seed, c) in runs {
+        for l in &c.layers {
+            let _ = writeln!(
+                csv,
+                "{seed},{},{},{},{},{},{:.6},{}",
+                l.layer.depth,
+                l.layer.spec.width,
+                l.layer.spec.height,
+                l.layer.budget.work,
+                l.work.neighbor_visits,
+                l.churn,
+                l.sterile
+            );
+        }
+    }
+    write_rows(out_dir, csv)
+}
+
+pub fn pipe_ensemble_summary(runs: &[(u64, Relay)]) -> String {
+    let mut s = String::new();
+    let seeds: Vec<u64> = runs.iter().map(|(s, _)| *s).collect();
+    ensemble_header(&mut s, &seeds);
+    let _ = writeln!(
+        s,
+        "content avalanche:     {}",
+        spread_cell(
+            &Spread::of(runs.iter().map(|(_, r)| r.content_avalanche)),
+            3
+        )
+    );
+    let _ = writeln!(
+        s,
+        "magnitude correlation: {}",
+        spread_cell(
+            &Spread::of(runs.iter().map(|(_, r)| r.magnitude_correlation())),
+            3
+        )
+    );
+    let _ = writeln!(
+        s,
+        "\n{:>10}  {:<28}",
+        "threshold", "registers: mean [min, max]"
+    );
+    let _ = writeln!(s, "{}", "-".repeat(40));
+    for &t in pipe::THRESHOLDS {
+        let sp = Spread::of(runs.iter().map(|(_, r)| r.visible_fraction(t)));
+        let _ = writeln!(s, "{:>10.2}  {:<28}", t, spread_cell(&sp, 3));
+    }
+    s.push_str(ENSEMBLE_CLOSER);
+    s
+}
+
+pub fn write_pipe_ensemble(runs: &[(u64, Relay)], out_dir: &Path) -> io::Result<PathBuf> {
+    let mut csv = String::from("seed,content_avalanche,magnitude_correlation\n");
+    for (seed, r) in runs {
+        let _ = writeln!(
+            csv,
+            "{seed},{:.6},{:.6}",
+            r.content_avalanche,
+            r.magnitude_correlation()
+        );
+    }
+    write_rows(out_dir, csv)
+}
+
+pub fn detect_ensemble_summary(runs: &[(u64, Vec<Finding>)]) -> String {
+    let mut s = String::new();
+    let seeds: Vec<u64> = runs.iter().map(|(s, _)| *s).collect();
+    let n = runs.len();
+    ensemble_header(&mut s, &seeds);
+    let _ = writeln!(
+        s,
+        "\n{:<24} {:<16} {:<15} {:>7}  {:<24} {:<24}",
+        "gaze", "limit", "signal", "found", "with: mean [min, max]", "without: mean [min, max]"
+    );
+    let _ = writeln!(s, "{}", "-".repeat(116));
+    let Some((_, first)) = runs.first() else {
+        return s;
+    };
+    for (i, f) in first.iter().enumerate() {
+        let at = |r: &Vec<Finding>| r.get(i).cloned();
+        let found = runs
+            .iter()
+            .filter(|(_, r)| at(r).is_some_and(|g| g.detectable))
+            .count();
+        let with = Spread::of(runs.iter().filter_map(|(_, r)| at(r).map(|g| g.with_value)));
+        let without = Spread::of(
+            runs.iter()
+                .filter_map(|(_, r)| at(r).map(|g| g.without_value)),
+        );
+        let _ = writeln!(
+            s,
+            "{:<24} {:<16} {:<15} {:>7}  {:<24} {:<24}",
+            f.gaze.label(),
+            f.limit,
+            f.signal,
+            format!("{found}/{n}"),
+            spread_cell(&with, 4),
+            spread_cell(&without, 4)
+        );
+    }
+    s.push_str(ENSEMBLE_CLOSER);
+    s
+}
+
+pub fn write_detect_ensemble(runs: &[(u64, Vec<Finding>)], out_dir: &Path) -> io::Result<PathBuf> {
+    let mut csv = String::from("seed,gaze,limit,signal,with_limit,without_limit,detectable\n");
+    for (seed, fs) in runs {
+        for f in fs {
+            let _ = writeln!(
+                csv,
+                "{seed},{},{},{},{:.6},{:.6},{}",
+                f.gaze.label(),
+                f.limit,
+                f.signal,
+                f.with_value,
+                f.without_value,
+                f.detectable
+            );
+        }
+    }
+    write_rows(out_dir, csv)
+}
+
+pub fn sweep_ensemble_summary(runs: &[(u64, Sweep)]) -> String {
+    let mut s = String::new();
+    let seeds: Vec<u64> = runs.iter().map(|(s, _)| *s).collect();
+    let n = runs.len();
+    ensemble_header(&mut s, &seeds);
+    let admitted = runs
+        .iter()
+        .filter(|(_, sw)| sw.reference_is_admitted())
+        .count();
+    let _ = writeln!(
+        s,
+        "productive share of distinct laws: {}",
+        spread_cell(
+            &Spread::of(runs.iter().map(|(_, sw)| sw.productive_rule_fraction())),
+            3
+        )
+    );
+    let _ = writeln!(
+        s,
+        "productive laws:                   {}",
+        spread_cell(
+            &Spread::of(runs.iter().map(|(_, sw)| sw.distinct_complex() as f64)),
+            1
+        )
+    );
+    let _ = writeln!(
+        s,
+        "distinct laws reachable:           {}",
+        spread_cell(
+            &Spread::of(runs.iter().map(|(_, sw)| sw.distinct_rules() as f64)),
+            1
+        )
+    );
+    let _ = writeln!(s, "Conway passed its own bar in {admitted}/{n} seeds");
+    s.push_str(ENSEMBLE_CLOSER);
+    s
+}
+
+pub fn write_sweep_ensemble(runs: &[(u64, Sweep)], out_dir: &Path) -> io::Result<PathBuf> {
+    let mut csv = String::from(
+        "seed,distinct_rules,distinct_complex,productive_rule_fraction,productive_fraction,reference_admitted\n",
+    );
+    for (seed, sw) in runs {
+        let _ = writeln!(
+            csv,
+            "{seed},{},{},{:.6},{:.6},{}",
+            sw.distinct_rules(),
+            sw.distinct_complex(),
+            sw.productive_rule_fraction(),
+            sw.productive_fraction(),
+            sw.reference_is_admitted()
+        );
+    }
+    write_rows(out_dir, csv)
+}
+
+pub fn boot_ensemble_summary(runs: &[(u64, BootChain)]) -> String {
+    let mut s = String::new();
+    let seeds: Vec<u64> = runs.iter().map(|(s, _)| *s).collect();
+    let n = runs.len();
+    ensemble_header(&mut s, &seeds);
+    let _ = writeln!(
+        s,
+        "depth reached: {}",
+        spread_cell(&Spread::of(runs.iter().map(|(_, c)| c.depth() as f64)), 2)
+    );
+    let deepest = runs.iter().map(|(_, c)| c.layers.len()).max().unwrap_or(0);
+    let _ = writeln!(
+        s,
+        "\n{:>5}  {:>6}  {:<26} {:<26}",
+        "depth", "seeds", "boots: mean [min, max]", "edge: mean [min, max]"
+    );
+    let _ = writeln!(s, "{}", "-".repeat(68));
+    for d in 0..deepest {
+        let layers: Vec<&BootLayer> = runs.iter().filter_map(|(_, c)| c.layers.get(d)).collect();
+        let boots = Spread::of(layers.iter().map(|l| l.survey.bootloaders as f64));
+        let edge = Spread::of(layers.iter().map(|l| l.spec.width as f64));
+        let _ = writeln!(
+            s,
+            "{:>5}  {:>6}  {:<26} {:<26}",
+            d + 1,
+            layers.len(),
+            spread_cell(&boots, 1),
+            spread_cell(&edge, 1)
+        );
+    }
+    let thinning = runs
+        .iter()
+        .filter(|(_, c)| {
+            c.layers
+                .windows(2)
+                .all(|w| w[1].survey.bootloaders <= w[0].survey.bootloaders)
+        })
+        .count();
+    let _ = writeln!(
+        s,
+        "\nbootloaders never rose down the chain in {thinning}/{n} seeds"
+    );
+    let mut reasons: Vec<(&str, usize)> = Vec::new();
+    for (_, c) in runs {
+        match reasons.iter_mut().find(|(r, _)| *r == c.ended_because) {
+            Some((_, k)) => *k += 1,
+            None => reasons.push((c.ended_because, 1)),
+        }
+    }
+    s.push_str("why the chain ended:\n");
+    for (r, k) in reasons {
+        let _ = writeln!(s, "  {k:>3}/{n}  {r}");
+    }
+    s.push_str(ENSEMBLE_CLOSER);
+    s
+}
+
+pub fn write_boot_ensemble(runs: &[(u64, BootChain)], out_dir: &Path) -> io::Result<PathBuf> {
+    let mut csv = String::from(
+        "seed,depth,width,height,layer_seed,bootloaders,transport,crossed,booted_child,ended_because\n",
+    );
+    for (seed, c) in runs {
+        for l in &c.layers {
+            let _ = writeln!(
+                csv,
+                "{seed},{},{},{},{},{},{:.3},{},{},\"{}\"",
+                l.depth,
+                l.spec.width,
+                l.spec.height,
+                l.seed,
+                l.survey.bootloaders,
+                l.survey.transport + 0.0,
+                l.crossed,
+                l.booted_child,
+                c.ended_because
+            );
+        }
+    }
+    write_rows(out_dir, csv)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1248,13 +1810,19 @@ mod tests {
     use crate::physics::Rules;
 
     fn exp() -> Experiment {
-        let cfg = Config {
+        run_all(&cfg(), |_| {})
+    }
+
+    fn cfg() -> Config {
+        Config {
             world: WorldCfg {
                 width: 32,
                 height: 32,
                 ticks: 6,
                 seed: 5,
                 init_density: 0.3,
+                seeds: 1,
+                seed_stride: 1000,
             },
             rules: Rules::default(),
             constraints: Constraints::ALL_ON,
@@ -1271,8 +1839,7 @@ mod tests {
             },
             nesting: Degradation::default(),
             horizon: crate::pipe::Horizon::default(),
-        };
-        run_all(&cfg, |_| {})
+        }
     }
 
     #[test]
@@ -1362,6 +1929,38 @@ mod tests {
     fn the_summary_refuses_to_overclaim() {
         let s = summary(&exp());
         assert!(s.contains("says nothing about whether our universe works this way"));
+    }
+
+    #[test]
+    fn the_ensemble_summary_refuses_to_overclaim_and_omits_wall_time() {
+        let mut c = cfg();
+        c.world.seeds = 3;
+        let ens = crate::experiment::run_ensemble(&c, |_| {});
+        let s = ensemble_summary(&ens);
+        assert!(s.contains("says nothing about whether our universe works this way"));
+        assert!(s.contains("3 seeds"));
+        assert!(
+            !s.contains(" ms"),
+            "parallel members have no honest wall time"
+        );
+        let json = ensemble_to_json(&ens);
+        assert_eq!(
+            json.chars().filter(|c| *c == '{').count(),
+            json.chars().filter(|c| *c == '}').count()
+        );
+        let csv = ensemble_to_csv(&ens);
+        assert_eq!(
+            csv.lines().count(),
+            1 + 3 * 5,
+            "a header, then a row per seed per limit"
+        );
+    }
+
+    #[test]
+    fn spread_cells_and_json_handle_an_empty_spread() {
+        let empty = Spread::of(std::iter::empty());
+        assert_eq!(spread_cell(&empty, 3), "n/a");
+        assert!(spread_json(&empty).contains("null"));
     }
 
     #[test]

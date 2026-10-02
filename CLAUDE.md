@@ -17,7 +17,7 @@ A workspace. `universe-core` is the crate at the repository root — the six mil
 ## Commands
 
 ```sh
-cargo run --release -- run  --config configs/default.toml  # Theory 1 experiment, ~11s on M1 Air
+cargo run --release -- run  --config configs/default.toml  # Theory 1, 20-seed ensemble; ~11s per seed on M1 Air
 cargo run --release -- run  --config configs/quick.toml    # small world for iterating
 cargo run --release -- nest --config configs/nesting.toml  # Theory 2 chain, <1s
 cargo run --release -- pipe --config configs/pipe.toml     # Theory 3 relay, <1s
@@ -38,7 +38,15 @@ cargo clippy --all-targets -- -D warnings                  # kept clean
 cargo fmt
 ```
 
-CLI overrides: `--seed <N>`, `--ticks <N>`, `--out <DIR>`.
+CLI overrides: `--seed <N>`, `--ticks <N>`, `--seeds <N>`, `--out <DIR>`.
+
+**Ensembles.** Every documented config sets `world.seeds = 20`. The pinned seed
+(42) runs alone first and prints in full; the rest run in parallel via
+`experiment::per_seed` and are summarised as `mean [min, max]`, written to
+`ensemble.csv` (and `ensemble.json` for `run`). Wall time is never reported for
+parallel members. A README number quoted from seed 42 must say so, and a claim
+must state its ensemble share. Seed 42 turned out to be an outlier on three
+findings; do not quote it alone again.
 
 CI (`.github/workflows/ci.yml`) runs fmt, clippy and tests on Linux, tests on
 macOS ARM, and a `claims` job that runs the documented experiment and asserts
@@ -101,15 +109,16 @@ Single crate. Module names match theory names — this is deliberate and load-be
 Recorded because they are results of the model, not assumptions fed into it:
 
 - All limits together: ~190× less work, ~14× less memory.
-- **Discrete time is the only free lunch** — halves the cost and diverges *below* the chaos floor (0.94×).
+- **Discrete time is the only free lunch** — halves the cost and diverges *below* the chaos floor (0.94× at seed 42; below its own floor in 20/20 seeds, 0.91 [0.83, 0.97]).
 - Space, speed cap and lazy rendering are all cheap but visible above the floor. Cheapness and invisibility are separate properties.
 - **Discrete time and the speed cap are coupled**: influence covers `radius × substeps` cells per tick over cells of size `1/subdivision`, so refining time without refining space raises the physical speed of influence. See `constraints::Resolved`.
 
 From v0.2:
 
 - A chain's total cost is bounded by `root / (1 - fraction)` — 1.33× the root layer at the default fraction. Nesting is bounded in total spend, not just depth.
+- (v0.8 ensemble) The deepest layer is calmer than the root in 20/20 seeds; the step-by-step decline holds in only 11/20. The "~10× per layer" below was seed 42 alone.
 - The shipped chain **dies of the spatial floor, not the budget floor**: the closed form allowed 4 layers, the chain built 3.
-- Churn falls ~10× per layer. The measure is biased *against* finding this (a fixed 16×16 macro grid makes small worlds look noisier), so the decline is if anything understated.
+- Churn falls ~10× per layer *at seed 42 only* (see the ensemble line above). The measure is biased *against* finding a decline (a fixed 16×16 macro grid makes small worlds look noisier), so the root-to-deepest decline is if anything understated.
 - `Degradation::max_depth` is an **upper bound**, not an equality: integer flooring at each generation costs real chains depth.
 - A child with budget slack legitimately keeps its host's size — shrinkage is derived from scarcity, never imposed. Pinned by `a_child_with_slack_may_keep_its_hosts_size`.
 
@@ -122,7 +131,7 @@ From v0.6:
 
 From v0.5:
 
-- 19% of reachable laws are productive: fine-tuning holds, but weakly.
+- 8.9% [2.4%, 19%] of reachable laws are productive across 20 seeds. Seed 42 gave the 19% that was first reported, the maximum. Productivity depends on the initial condition as well as the law.
 - **Complexity criteria must be bands, not floors.** An activity floor admitted chaotic rules churning at 20× Conway. Class 3 is not class 4.
 - **Count distinct laws, not grid area.** 441 settings denote 42 laws because only `k/8` densities occur. An area fraction reports the sweep's resolution, not the universe's. `sweep::rule_signature` canonicalises.
 - Raw macro variance nearly tracks density; normalise by the i.i.d. baseline `p(1-p)/cells_per_macro` before calling anything "structure".
