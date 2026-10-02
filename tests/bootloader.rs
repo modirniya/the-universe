@@ -7,7 +7,7 @@
 
 use std::path::Path;
 
-use universe_core::bootloader::{self, MIN_LIFETIME};
+use universe_core::bootloader::{self, Gate, MIN_LIFETIME};
 use universe_core::budget::Budget;
 use universe_core::config::Config;
 use universe_core::constraints::Constraints;
@@ -159,4 +159,60 @@ fn the_summary_calls_it_a_precondition_not_an_achievement() {
         "the report must not claim this builds a computer"
     );
     assert!(text.contains("nothing in this model builds a computer"));
+}
+
+// ---------------------------------------------------------------------------
+// The ablation: what the bootloader gate actually does
+// ---------------------------------------------------------------------------
+
+fn permissive() -> Config {
+    Config::load(Path::new("configs/boot-permissive.toml")).expect("shipped config must load")
+}
+
+fn gated_and_open(c: &Config) -> (bootloader::BootChain, bootloader::BootChain) {
+    let run =
+        |gate| bootloader::run_boot_chain_with(c, root_budget(c), &c.nesting, gate, |_, _| {});
+    (run(Gate::Bootloader), run(Gate::Open))
+}
+
+#[test]
+fn under_the_shipped_floors_the_gate_never_fires() {
+    // Every layer has a bootloader before the spatial floor ends the chain, so
+    // removing the gate changes nothing at all.
+    let (g, u) = gated_and_open(&cfg());
+    assert!(g.same_layers(&u));
+    assert!(g.layers.iter().all(|l| l.survey.can_boot()));
+}
+
+#[test]
+fn bootloaders_decide_whether_a_child_exists_never_what_it_is() {
+    // The child's seed is hashed from what crossed the horizon. An ungated
+    // chain must therefore rebuild every layer the gated one built, exactly.
+    let mut c = permissive();
+    c.world.seed = 1042;
+    let (g, u) = gated_and_open(&c);
+    assert!(
+        g.is_prefix_of(&u),
+        "the gate must only ever shorten a chain"
+    );
+    assert!(
+        u.depth() > g.depth(),
+        "at seed 1042 the gate is what stops the chain"
+    );
+    let last = g.layers.last().unwrap();
+    assert!(
+        !last.survey.can_boot(),
+        "the gated chain stopped on a sterile layer"
+    );
+}
+
+#[test]
+fn the_ablation_report_says_when_the_gate_fired_harmlessly() {
+    // At seed 42 under permissive floors the last layer is sterile, but no
+    // smaller world is viable, so both chains stop at the same place.
+    let (g, u) = gated_and_open(&permissive());
+    assert!(g.same_layers(&u));
+    let text = report::gate_ablation(&g, &u);
+    assert!(text.contains("would have stopped there anyway"), "{text}");
+    assert!(!text.contains("never\nfired"));
 }

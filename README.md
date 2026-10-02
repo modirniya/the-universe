@@ -56,10 +56,11 @@ out otherwise, and the ensemble column says how often it did not.
 | 441 rule settings denote 42 laws | `sweep` | follows from rules | An eight-cell neighbourhood only has densities `k/8`. |
 | A minority of laws is productive | `sweep` | had to be run | 8.9% [2.4%, 19%] across 20 seeds. |
 | Poorer layers grow fewer bootloaders | `bootloader` | had to be run | Never rises down a chain in 20/20 seeds. |
-| A chain can end for want of life with budget in hand | `bootloader` | had to be run | Depends on the floors in `[nesting]`. |
+| A chain can end for want of life with budget in hand | `bootloader` | follows from rules | The gate forbids a sterile layer to seed; that it binds before space did in 8/20 permissive seeds had to be run. |
+| Bootloaders never change what a child receives | `bootloader` | follows from rules | The child's seed is hashed from the horizon alone; the ablation confirms it in 40/40 chains. |
 | Same seed, same universe, on two targets | `golden` | had to be run | One fingerprint, asserted natively and on WebAssembly. |
 
-Of the 23 rows, 11 follow from the rules and 12 had to be run. The second half
+Of the 24 rows, 13 follow from the rules and 11 had to be run. The second half
 is what this repository has to offer. The first half is worth keeping because
 it shows the framework's ideas can be built at all, which is the coherence
 claim and nothing more.
@@ -118,7 +119,7 @@ under a second each. `configs/quick.toml` is a much smaller world for iterating
 on code — too short to draw conclusions from, and a single seed.
 
 ```sh
-cargo test --workspace              # 235 tests, most of them on the physics
+cargo test --workspace              # 238 tests, most of them on the physics
 cargo run --release -- --help
 ```
 
@@ -559,13 +560,13 @@ depth        world           seed    boots   transport   crossed    child
     3        24x24      937860900        6        84.7       104      yes
 ```
 
-**Every layer is seeded by what crossed its parent's horizon.** This is the
-whole framework closed into a loop, and it uses every part of it: emergent
-structures (Theory 5) drive the activity, the activity is what crosses the pipe
-(Theory 3), what crosses is all the child ever receives (Theory 4), and the
-child's budget is a fraction of its parent's (Theory 2), running under the
-optimizations of Theory 1. Neither end can see through the pipe, and the child
-is booted anyway.
+**Every layer is seeded by what crossed its parent's horizon.** The parent's
+activity is what crosses the pipe (Theory 3), what crosses is all the child ever
+receives (Theory 4), and the child's budget is a fraction of its parent's
+(Theory 2), running under the optimizations of Theory 1. Neither end can see
+through the pipe, and the child is booted anyway. Where Theory 5 enters is the
+subject of the ablation below, and it enters less than this section first
+claimed.
 
 **Poorer layers produce less life.** Bootloaders fall 128 → 32 → 6 as the
 layers shrink at seed 42, and 113 → 28 → 6 on average across 20 seeds, never
@@ -583,14 +584,49 @@ that produces nothing which travels — with money still in hand:
 stopped: the layer produced no bootloader, so there was nothing to boot with
 ```
 
-That gives Theory 5 a limit on depth entirely its own, independent of the
-budget limit in v0.2. A chain ends for whichever reason arrives first, and which
-one that is depends on the settings rather than being decided in advance.
+Reproduce it with `configs/boot-permissive.toml`, which is the shipped config
+with the floors lowered to a 4-cell edge and 2000 work units. Across 20 seeds
+under those floors, 17 chains report that they ended for want of a bootloader
+and 3 for want of space. The label overstates sterility, as the ablation shows.
+
+**The ablation: what the bootloader gate does.** A child's seed is hashed from
+what crossed its parent's horizon and from nothing else. Bootloaders never
+enter it. The only way they reach the next layer is a gate: a layer with no
+bootloader may not seed a child. So the gate was made a switch, and every chain
+was run with it and without it. The rule for reading the result was fixed in
+advance. If the ungated chains match the gated ones on every seed, Theory 5 has
+no result here and the gate is an interpretation. If they differ, report where.
+
+```
+cargo run --release -- boot --config configs/boot.toml
+gate ablation over 20 seeds: identical chains 20/20, ungated ran on 0/20, differed in shared layers 0/20
+the gate fired in 0/20 seeds and was the only thing stopping the chain in 0/20
+
+cargo run --release -- boot --config configs/boot-permissive.toml
+gate ablation over 20 seeds: identical chains 12/20, ungated ran on 8/20, differed in shared layers 0/20
+the gate fired in 17/20 seeds and was the only thing stopping the chain in 8/20
+```
+
+Under the shipped floors the gate never fires, so Theory 5 changes nothing in
+the documented chain: every layer has a bootloader before space runs out.
+Under permissive floors it fires in 17 seeds, but in 9 of those no smaller
+world was viable either, so sterility was the sole binding limit in 8 of 20.
+And in no seed, under either floor, did gated and ungated chains differ in any
+layer they both built. That last result follows from the code, and the ablation
+confirms it.
+
+So the honest statement of Theory 5 in this model is narrow. **Bootloaders
+decide whether a child exists, never what it is.** They are a stopping rule
+attached to the chain, not a mechanism inside it. The sterility limit is real,
+and it is a limit the framework chose to impose rather than one the dynamics
+produce. The gate stays, because it is the framework's rule, and it is now
+labelled as one.
 
 **What this is not.** A bootloader here is a precondition, not an achievement.
 Nothing in this model builds a computer. It shows that the transport such a
-thing would require is available, and that a layer without it has no way to seed
-the next one.
+thing would require is available. That a layer without it cannot seed the next
+one is the framework's rule, enforced by the gate, not a consequence the model
+discovered.
 
 ## v0.7: the universe becomes watchable
 

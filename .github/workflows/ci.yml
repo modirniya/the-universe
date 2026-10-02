@@ -85,6 +85,9 @@ jobs:
       - name: Run the documented boot chain
         run: cargo run --release -- boot --config configs/boot.toml
 
+      - name: Run the boot chain under permissive floors
+        run: cargo run --release -- boot --config configs/boot-permissive.toml
+
       - name: Artifacts were written
         run: |
           test -s out/runs.csv && test -s out/report.json
@@ -93,6 +96,7 @@ jobs:
           test -s out/detect/detection.csv && test -s out/detect/detection.json
           test -s out/sweep/sweep.csv && test -s out/sweep/sweep.json
           test -s out/boot/boot.csv && test -s out/boot/boot.json
+          test -s out/boot/gate.csv && test -s out/boot-permissive/gate.csv
           test -s out/ensemble.csv && test -s out/ensemble.json
           for d in nesting pipe detect sweep boot; do test -s out/$d/ensemble.csv; done
 
@@ -449,6 +453,19 @@ jobs:
                   fail.append(f"boot: seed {seed} reached only depth {len(depths)}")
               if any(b[y] > b[x] for x, y in zip(depths, depths[1:])):
                   fail.append(f"boot: bootloaders rose down the chain at seed {seed}")
+          # The gate ablation. Bootloaders never change what a child receives,
+          # under either floor; under the shipped floors the gate never fires.
+          for path, may_fire in (("out/boot/gate.csv", False),
+                                 ("out/boot-permissive/gate.csv", True)):
+              rows = list(csv.DictReader(open(path)))
+              if not all(r["prefix"] == "true" for r in rows):
+                  fail.append(f"{path}: a gated chain differed from the ungated one in a shared layer")
+              fired = sum(r["gate_fired"] == "true" for r in rows)
+              if not may_fire and fired:
+                  fail.append(f"{path}: the gate fired in {fired} seeds under the shipped floors")
+              if may_fire and not any(int(r["ungated_depth"]) > int(r["gated_depth"]) for r in rows):
+                  fail.append(f"{path}: the gate never stopped a chain under permissive floors")
+              print(f"boot: {path} gate fired in {fired}/{len(rows)}")
           print(f"boot: {len(boots)} chains checked")
 
           if fail:

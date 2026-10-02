@@ -1952,6 +1952,148 @@ pub fn boot_ensemble_summary(runs: &[(u64, BootChain)]) -> String {
     s
 }
 
+/// What removing the bootloader gate changed, for one seed.
+///
+/// The child's seed is hashed from what crossed the horizon and nothing else,
+/// so the gate is the only way bootloaders reach the next layer. If the two
+/// chains build the same layers, the gate never fired and bootloaders changed
+/// nothing; if the ungated one runs on past a layer, the gate is what stopped
+/// it, and still nothing about the layers it shares was decided by life.
+pub fn gate_ablation(gated: &BootChain, ungated: &BootChain) -> String {
+    let mut s = String::new();
+    let _ = writeln!(
+        s,
+        "ablation: the same chain with the bootloader gate removed\n\n\
+         {:<10} {:>6}  ended because",
+        "", "depth"
+    );
+    for c in [gated, ungated] {
+        let _ = writeln!(
+            s,
+            "{:<10} {:>6}  {}",
+            c.gate.label(),
+            c.depth(),
+            c.ended_because
+        );
+    }
+    s.push('\n');
+    let fired_at = gated
+        .layers
+        .iter()
+        .find(|l| !l.survey.can_boot())
+        .map(|l| l.depth);
+    if gated.same_layers(ungated) {
+        match fired_at {
+            None => s.push_str(
+                "the two chains are identical: every layer had a bootloader, so the gate never\n\
+                 fired, and bootloaders changed nothing the next layer received.\n",
+            ),
+            Some(d) => {
+                let _ = writeln!(
+                    s,
+                    "the two chains are identical: the gate fired at depth {d}, but no smaller world\n\
+                     was viable, so the chain would have stopped there anyway."
+                );
+            }
+        }
+    } else if gated.is_prefix_of(ungated) {
+        let _ = writeln!(
+            s,
+            "the ungated chain built the same {} layers and then {} more: the gate is what\n\
+             stopped it. bootloaders decide whether a child exists, never what it is.",
+            gated.depth(),
+            ungated.depth() - gated.depth()
+        );
+    } else {
+        s.push_str(
+            "the two chains differ in layers they share: bootloaders shaped what a child\n\
+             received, not only whether it existed.\n",
+        );
+    }
+    s
+}
+
+/// The ablation across an ensemble.
+pub fn gate_ensemble_summary(runs: &[(u64, (BootChain, BootChain))]) -> String {
+    let mut s = String::new();
+    let n = runs.len();
+    let identical = runs.iter().filter(|(_, (g, u))| g.same_layers(u)).count();
+    let extended = runs
+        .iter()
+        .filter(|(_, (g, u))| !g.same_layers(u) && g.is_prefix_of(u))
+        .count();
+    let other = n - identical - extended;
+    let fired = runs
+        .iter()
+        .filter(|(_, (g, _))| g.layers.iter().any(|l| !l.survey.can_boot()))
+        .count();
+    let _ = writeln!(
+        s,
+        "gate ablation over {n} seeds: identical chains {identical}/{n}, ungated ran on \
+         {extended}/{n}, differed in shared layers {other}/{n}"
+    );
+    let _ = writeln!(
+        s,
+        "the gate fired in {fired}/{n} seeds and was the only thing stopping the chain in {extended}/{n}"
+    );
+    let _ = writeln!(
+        s,
+        "depth gated {}, ungated {}",
+        spread_cell(
+            &Spread::of(runs.iter().map(|(_, (g, _))| g.depth() as f64)),
+            2
+        ),
+        spread_cell(
+            &Spread::of(runs.iter().map(|(_, (_, u))| u.depth() as f64)),
+            2
+        )
+    );
+    s
+}
+
+/// The ablation across an ensemble, one row per seed.
+pub fn write_gate_ensemble(
+    runs: &[(u64, (BootChain, BootChain))],
+    out_dir: &Path,
+) -> io::Result<PathBuf> {
+    std::fs::create_dir_all(out_dir)?;
+    let mut csv = String::from("seed,gated_depth,ungated_depth,gate_fired,identical,prefix\n");
+    for (seed, (g, u)) in runs {
+        let _ = writeln!(
+            csv,
+            "{seed},{},{},{},{},{}",
+            g.depth(),
+            u.depth(),
+            g.layers.iter().any(|l| !l.survey.can_boot()),
+            g.same_layers(u),
+            g.is_prefix_of(u)
+        );
+    }
+    let path = out_dir.join("gate.csv");
+    std::fs::write(&path, csv)?;
+    Ok(path)
+}
+
+/// One chain's ablation as a JSON object.
+pub fn gate_json(gated: &BootChain, ungated: &BootChain) -> String {
+    format!(
+        "{{\"gated_depth\": {}, \"ungated_depth\": {}, \"identical\": {}, \
+         \"ungated_extends_gated\": {}, \"ungated_ended_because\": \"{}\"}}",
+        gated.depth(),
+        ungated.depth(),
+        gated.same_layers(ungated),
+        gated.is_prefix_of(ungated),
+        ungated.ended_because
+    )
+}
+
+pub fn write_gate(gated: &BootChain, ungated: &BootChain, out_dir: &Path) -> io::Result<PathBuf> {
+    std::fs::create_dir_all(out_dir)?;
+    let path = out_dir.join("ablation.json");
+    std::fs::write(&path, gate_json(gated, ungated) + "\n")?;
+    Ok(path)
+}
+
 pub fn write_boot_ensemble(runs: &[(u64, BootChain)], out_dir: &Path) -> io::Result<PathBuf> {
     let mut csv = String::from(
         "seed,depth,width,height,layer_seed,bootloaders,transport,crossed,booted_child,ended_because\n",

@@ -4,7 +4,7 @@
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use universe_core::bootloader;
+use universe_core::bootloader::{self, Gate};
 use universe_core::budget::Budget;
 use universe_core::config::Config;
 use universe_core::detector::{self, Gaze, Inhabitant};
@@ -299,14 +299,34 @@ fn execute_boot(
         written.json.display()
     );
 
+    // The ablation: the same chain with the bootloader gate removed.
+    let ungated =
+        bootloader::run_boot_chain_with(cfg, root_budget, &cfg.nesting, Gate::Open, |_, _| {});
+    println!();
+    print!("{}", report::gate_ablation(&chain, &ungated));
+    println!(
+        "wrote {}",
+        report::write_gate(&chain, &ungated, out_dir)?.display()
+    );
+
     if cfg.world.seeds > 1 {
-        let runs = with_rest(cfg, chain, |c| {
-            bootloader::run_boot_chain(c, root_budget, &c.nesting, |_, _| {})
+        let runs = with_rest(cfg, (chain, ungated), |c| {
+            let run =
+                |gate| bootloader::run_boot_chain_with(c, root_budget, &c.nesting, gate, |_, _| {});
+            (run(Gate::Bootloader), run(Gate::Open))
         });
+        let gated: Vec<(u64, bootloader::BootChain)> =
+            runs.iter().map(|(s, (g, _))| (*s, g.clone())).collect();
         print_ensemble(
-            report::boot_ensemble_summary(&runs),
-            report::write_boot_ensemble(&runs, out_dir),
+            report::boot_ensemble_summary(&gated),
+            report::write_boot_ensemble(&gated, out_dir),
         )?;
+        println!();
+        print!("{}", report::gate_ensemble_summary(&runs));
+        println!(
+            "wrote {}",
+            report::write_gate_ensemble(&runs, out_dir)?.display()
+        );
     }
     Ok(())
 }

@@ -178,10 +178,17 @@ parent, through a channel neither end can see through.
 
 **What would falsify it within the model:** bootloaders appearing everywhere,
 which would make them unremarkable and disconnect this from Theory 6; or nowhere,
-which would mean the chain is inert by construction. Neither happened. What did
-happen is a second limit on depth: a chain can end because a layer is too small
-to grow anything that travels, with budget still in hand. Life gives out before
-money does, given a permissive enough floor.
+which would mean the chain is inert by construction. Neither happened.
+
+**What the model does not show.** The child's seed is derived from what crossed
+the horizon, and bootloaders never enter it. They reach the next layer only
+through a gate the framework imposes: a layer with no bootloader may not seed a
+child. Removing the gate changes nothing under the shipped floors, and under
+permissive ones it only lets chains run further; in no case does it change what
+a child is. So in this model life decides *whether* the next layer exists, by
+rule, and never *what* it is. A version of Theory 5 with teeth would need the
+child to depend on what the bootloaders did, and that is the unscheduled
+research track, not this repository.
 
 **What it is not.** Nothing here builds a computer. The model shows the
 precondition is available, not that the achievement follows. "The cosmic role

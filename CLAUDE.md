@@ -23,7 +23,8 @@ cargo run --release -- nest --config configs/nesting.toml  # Theory 2 chain, <1s
 cargo run --release -- pipe --config configs/pipe.toml     # Theory 3 relay, <1s
 cargo run --release -- detect --config configs/detect.toml # Detection survey, ~10s
 cargo run --release -- sweep  --config configs/sweep.toml  # Theory 6 sweep, ~6s at 21 steps
-cargo run --release -- boot   --config configs/boot.toml   # Theory 5 boot chain, ~5s
+cargo run --release -- boot   --config configs/boot.toml   # Theory 5 boot chain + gate ablation, ~5s
+cargo run --release -- boot   --config configs/boot-permissive.toml  # low floors: sterility and the gate
 cargo test --workspace                                     # native suite
 cargo test physics::                                       # one module
 cargo test blinker_oscillates_with_period_two              # one test by name
@@ -127,6 +128,7 @@ From v0.2:
 From v0.6:
 
 - The boot chain closes the loop: each layer is seeded from what crossed its parent's horizon, using all six theories at once.
+- (ablation) Bootloaders never enter a child's seed; they act only through `bootloader::Gate`. Under the shipped floors the gate never fires (20/20 identical chains). Under `configs/boot-permissive.toml` it is the sole stop in 8/20 seeds and never changes a shared layer. Do not describe bootloaders as driving or shaping the next layer.
 - **A chain can die of sterility rather than poverty** — Theory 5 supplies a depth limit independent of the budget. Which limit binds depends on the floors in `[nesting]`.
 - Poorer layers produce less life: bootloaders fall 128 → 32 → 6 down the chain.
 - Rust folds float sums from `-0.0` (the true additive identity), so an empty `sum::<f64>()` prints as `-0.0`. Normalise with `+ 0.0` before reporting.

@@ -26,6 +26,16 @@
 //! space, which would make them unremarkable and disconnect Theory 5 from
 //! Theory 6; or if no rule produces them, which would mean the model cannot
 //! boot anything and the chain in [`crate::layer`] is inert by construction.
+//!
+//! # What the bootloaders do not do
+//!
+//! A child's seed is [`boot_seed`] of what crossed its parent's horizon, and
+//! nothing a bootloader did enters that hash. Bootloaders reach the next layer
+//! only through [`Gate::Bootloader`], which forbids a sterile layer to seed a
+//! child. [`Gate::Open`] removes it, and the ablation in `the-universe boot`
+//! shows the result: the gate can shorten a chain, and never changes a layer.
+//! That is the framework's rule, and the module says so rather than presenting
+//! it as something the dynamics produced.
 
 use crate::budget::{Budget, Degradation};
 use crate::config::Config;
@@ -312,9 +322,33 @@ pub struct BootLayer {
     pub booted_child: bool,
 }
 
+/// Whether a layer needs a bootloader before its horizon may seed a child.
+///
+/// This is an ablation switch. The child's seed is derived from what crossed
+/// the horizon and from nothing else; bootloaders never enter it. So the only
+/// causal link between Theory 5's bootloaders and the next layer is this
+/// gate. [`Gate::Open`] removes it, to show what the chain does without it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Gate {
+    /// A layer with no bootloader seeds nothing. The framework's rule.
+    Bootloader,
+    /// Anything that clears the logging threshold seeds the child.
+    Open,
+}
+
+impl Gate {
+    pub fn label(&self) -> &'static str {
+        match self {
+            Gate::Bootloader => "gated",
+            Gate::Open => "ungated",
+        }
+    }
+}
+
 /// A chain in which every layer is booted by the one above it.
 #[derive(Clone, Debug)]
 pub struct BootChain {
+    pub gate: Gate,
     pub layers: Vec<BootLayer>,
     /// Why it stopped. The interesting part: a chain can run out of money or
     /// run out of life, and which comes first is not decided in advance.
@@ -324,6 +358,29 @@ pub struct BootChain {
 impl BootChain {
     pub fn depth(&self) -> usize {
         self.layers.len()
+    }
+
+    /// Whether two chains built the same layers from the same seeds.
+    ///
+    /// This is the ablation's question: did removing the gate change anything
+    /// a layer received, or only where the chain stopped?
+    pub fn same_layers(&self, other: &BootChain) -> bool {
+        self.layers.len() == other.layers.len()
+            && self
+                .layers
+                .iter()
+                .zip(&other.layers)
+                .all(|(a, b)| a.seed == b.seed && a.spec == b.spec && a.survey == b.survey)
+    }
+
+    /// Whether `other`'s layers start with exactly this chain's layers.
+    pub fn is_prefix_of(&self, other: &BootChain) -> bool {
+        self.layers.len() <= other.layers.len()
+            && self
+                .layers
+                .iter()
+                .zip(&other.layers)
+                .all(|(a, b)| a.seed == b.seed && a.spec == b.spec && a.survey == b.survey)
     }
 }
 
@@ -345,6 +402,17 @@ pub fn run_boot_chain(
     cfg: &Config,
     root_budget: Budget,
     deg: &Degradation,
+    on_layer: impl FnMut(usize, &LayerSpec),
+) -> BootChain {
+    run_boot_chain_with(cfg, root_budget, deg, Gate::Bootloader, on_layer)
+}
+
+/// [`run_boot_chain`] with the bootloader gate chosen explicitly.
+pub fn run_boot_chain_with(
+    cfg: &Config,
+    root_budget: Budget,
+    deg: &Degradation,
+    gate: Gate,
     mut on_layer: impl FnMut(usize, &LayerSpec),
 ) -> BootChain {
     let root = LayerSpec {
@@ -383,7 +451,7 @@ pub fn run_boot_chain(
         let relay = crate::pipe::run_relay(&layer_cfg, &horizon);
         let crossed = relay.received.above(cfg.horizon.threshold);
 
-        let child_seed = if survey.can_boot() {
+        let child_seed = if survey.can_boot() || gate == Gate::Open {
             boot_seed(&crossed)
         } else {
             // A layer with no bootloaders transports nothing, whatever its
@@ -402,7 +470,7 @@ pub fn run_boot_chain(
         });
 
         let Some(next_seed) = child_seed else {
-            break if survey.can_boot() {
+            break if survey.can_boot() || gate == Gate::Open {
                 "nothing cleared the logging threshold, so no seed reached the next layer"
             } else {
                 "the layer produced no bootloader, so there was nothing to boot with"
@@ -420,6 +488,7 @@ pub fn run_boot_chain(
     };
 
     BootChain {
+        gate,
         layers,
         ended_because,
     }
