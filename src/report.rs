@@ -228,6 +228,14 @@ fn floor_ratio(d: f64, floor: f64) -> f64 {
 const NOTICEABLE: f64 = 1.25;
 const CHEAP: f64 = 0.9;
 
+/// Which of the numbers above could have come out otherwise.
+///
+/// The work and memory columns are arithmetic on the config: fewer cells,
+/// fewer substeps, a smaller radius, fewer resolved blocks. Printing them as
+/// if they were measured would overstate what the run adds.
+const EARNED: &str = "the work and memory ratios follow from the rules by arithmetic; \
+only the divergences had to be run to be known.\n";
+
 /// State what the numbers support, and refuse to overstate it.
 fn verdict(exp: &Experiment) -> String {
     let mut s = String::new();
@@ -277,6 +285,7 @@ fn verdict(exp: &Experiment) -> String {
         s.push_str("no limit was both cheap and invisible at this threshold\n");
     }
 
+    s.push_str(EARNED);
     s.push_str(
         "\nthis says the limits are coherent as optimizations inside this model. \
          it says nothing about whether our universe works this way.\n",
@@ -490,6 +499,7 @@ fn ensemble_verdict(ens: &Ensemble) -> String {
     if !never.is_empty() {
         let _ = writeln!(s, "free in no seed: {}", never.join(", "));
     }
+    s.push_str(EARNED);
     s.push_str(
         "\nthis says the limits are coherent as optimizations inside this model. \
          it says nothing about whether our universe works this way.\n",
@@ -2012,6 +2022,10 @@ mod tests {
     fn the_summary_refuses_to_overclaim() {
         let s = summary(&exp());
         assert!(s.contains("says nothing about whether our universe works this way"));
+        assert!(
+            s.contains("follow from the rules by arithmetic"),
+            "the summary must say which columns were never in doubt"
+        );
     }
 
     #[test]
@@ -2021,6 +2035,7 @@ mod tests {
         let ens = crate::experiment::run_ensemble(&c, |_| {});
         let s = ensemble_summary(&ens);
         assert!(s.contains("says nothing about whether our universe works this way"));
+        assert!(s.contains("follow from the rules by arithmetic"));
         assert!(s.contains("3 seeds"));
         assert!(
             !s.contains(" ms"),

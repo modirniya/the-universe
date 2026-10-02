@@ -111,7 +111,9 @@ Recorded because they are results of the model, not assumptions fed into it:
 - All limits together: ~190× less work, ~14× less memory.
 - **Discrete time is the only free lunch** — halves the cost and diverges *below* the chaos floor (0.94× at seed 42; below its own floor in 20/20 seeds, 0.91 [0.83, 0.97]).
 - Space, speed cap and lazy rendering are all cheap but visible above the floor. Cheapness and invisibility are separate properties.
-- **Discrete time and the speed cap are coupled**: influence covers `radius × substeps` cells per tick over cells of size `1/subdivision`, so refining time without refining space raises the physical speed of influence. See `constraints::Resolved`.
+- **Discrete time and the speed cap are coupled**: influence covers `radius × substeps` cells per tick over cells of size `1/subdivision`, so refining time without refining space raises the physical speed of influence. See `constraints::Resolved`. This follows from the definitions; it was noticed, not discovered.
+
+**Earned versus by construction.** The README's "What had to be run" table classifies every finding. When a milestone adds or changes a finding, update that table and its row counts in the same commit. Do not describe a result that follows from a module's definitions as a discovery.
 
 From v0.2:
 

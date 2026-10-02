@@ -83,13 +83,16 @@ the spatial floor before it ran out of money.
 
 A **pipe** is a one-way channel between layers.
 
-The framework's candidate for a real one is the black hole. What goes in does
+The framework's candidate for a real one is the black hole: what goes in does
 not come back, and what comes out bears no resemblance to what went in. That is
-exactly the behaviour of a serializing write: structure is destroyed,
-compressed, scrambled. The **horizon** is the write surface. The singularity is
-not a place inside the child universe at all — it is outside the child's
-address space, which is why the child's physics reports it as a division by
-zero rather than as a location.
+the behaviour of a serializing write, in which structure is destroyed,
+compressed, scrambled. The **horizon** is the write surface.
+
+That is an analogy, and nothing in this repository tests it. The model has no
+gravity, no horizon in the physical sense, and no singularity. An earlier
+version of this section said the singularity lies outside the child's address
+space, which is why physics reports it as a division by zero; that is a claim
+about our universe, the code cannot reach it, and it has been withdrawn.
 
 What might survive serialization is not content but *timing and magnitude*: how
 much went in, and when. A parent reading the far end of the pipe would receive
@@ -179,7 +182,9 @@ to grow anything that travels, with budget still in hand. Life gives out before
 money does, given a permissive enough floor.
 
 **What it is not.** Nothing here builds a computer. The model shows the
-precondition is available, not that the achievement follows.
+precondition is available, not that the achievement follows. "The cosmic role
+of emergent agents is to boot the next layer" is an interpretation of the
+framework, not an output of any experiment here.
 
 ---
 
@@ -215,6 +220,12 @@ eight cells only admits densities k/8 and 441 settings collapse onto 42 laws.
 ---
 
 ## The parts that cannot be coded
+
+Sections 1 to 6 are tested, but only as models: each has a module that
+implements it and a command whose output can contradict it, and every such test
+is a test of the toy, not of the world. Sections 7 to 10 are not tested at all.
+Nothing in the repository bears on them, and no run of it is evidence for or
+against them. They are here to say why the experiments were worth building.
 
 Everything above can be modelled. What follows cannot, and lives here so that
 it stays out of the code.

@@ -22,6 +22,47 @@ about its own behaviour.
 Philosophy that cannot be coded lives in [`docs/philosophy.md`](docs/philosophy.md),
 not in the code.
 
+## What had to be run
+
+A runnable model earns its keep only where it produces something not evident
+from its rules. Some findings below are of that kind. Others follow from how a
+module was written, and running it only confirms the arithmetic. Both are
+listed, because a reader cannot tell them apart from the output alone.
+
+"Follows from rules" means the result can be derived on paper from the code's
+definitions without running anything. "Had to be run" means it could have come
+out otherwise, and the ensemble column says how often it did not.
+
+| Finding | Module | Verdict | Why |
+| --- | --- | --- | --- |
+| Each limit's work and memory ratio (0.25, 0.5, 0.167, ...) | `constraints`, `physics` | follows from rules | Fewer cells, substeps, neighbours or resolved blocks; the ratios are arithmetic on the config. |
+| Discrete time diverges below the chaos floor | `experiment` | had to be run | Holds in 20/20 seeds, 0.91 [0.83, 0.97]. |
+| Space, speed cap and lazy rendering are visible above the floor | `experiment` | had to be run | Holds in 20/20 seeds. |
+| Discrete time and the speed cap are coupled | `constraints` | follows from rules | Influence speed is `radius × substeps / subdivision` by definition; it was noticed, not discovered. |
+| A nested chain is finite | `budget` | follows from rules | A strict fraction of an integer budget reaches the floor. |
+| Total chain cost is under 1.33× the root | `budget` | follows from rules | A geometric series. |
+| The chain dies of the spatial floor before the budget floor | `layer` | had to be run | Computed from exact block costs; depends on how the probe lands on blocks. |
+| Cost is not monotonic in world size | `layer` | had to be run | Block quantisation; not obvious until computed. |
+| The deepest layer is calmer than the root | `layer` | had to be run | 20/20 seeds. The per-layer decline holds in only 11/20. |
+| Magnitude crosses the pipe and arrangement does not | `pipe` | follows from rules | The message carries a magnitude and a hash. |
+| The digest avalanches | `pipe` | follows from rules | A check that the fold is a hash. |
+| Two to six bits a tick keep 90% of what crosses | `pipe` | had to be run | Every seed in 2–6 bits; the curve dips at 3 bits in all of them. |
+| A child cannot learn that it is read | `pipe` | follows from rules | The type system has no method for it. |
+| Pixelation is invisible from inside | `detector` | follows from rules | The inhabitant measures in cells. Step 6 below tests a stronger detector. |
+| The speed of influence is findable, as an unfactorable product | `detector` | follows from rules | The measured reach is `radius × substeps` by construction. |
+| Looking conceals lazy rendering | `detector` | follows from rules | A probe forces rendering by definition, so a looking inhabitant only ever reads rendered cells. |
+| A passive reader can find lazy rendering | `detector` | had to be run | 12/20 seeds. |
+| 441 rule settings denote 42 laws | `sweep` | follows from rules | An eight-cell neighbourhood only has densities `k/8`. |
+| A minority of laws is productive | `sweep` | had to be run | 8.9% [2.4%, 19%] across 20 seeds. |
+| Poorer layers grow fewer bootloaders | `bootloader` | had to be run | Never rises down a chain in 20/20 seeds. |
+| A chain can end for want of life with budget in hand | `bootloader` | had to be run | Depends on the floors in `[nesting]`. |
+| Same seed, same universe, on two targets | `golden` | had to be run | One fingerprint, asserted natively and on WebAssembly. |
+
+Of the 22 rows, 11 follow from the rules and 11 had to be run. The second half
+is what this repository has to offer. The first half is worth keeping because
+it shows the framework's ideas can be built at all, which is the coherence
+claim and nothing more.
+
 ## The question v0.1 asks
 
 Theory 1 of the framework says physical limits are not fundamental truths but
@@ -144,12 +185,13 @@ as a universe that holds substantially less structure (occupancy 0.05 against
 the reference's 0.22). Cheapness and invisibility are separate properties, and
 the framework does not get to assume they come together.
 
-**One result was not designed in.** Discrete time and the speed cap turn out to
-be *coupled*: influence covers `radius × substeps` cells per tick, and a cell is
-`1 / subdivision` of a base length, so refining time without refining space
-raises the physical speed of influence. A creator cannot relax one of these
-limits without paying in another. That falls out of the model rather than
-having been assumed by it. See `constraints::Resolved`.
+**One coupling was noticed rather than intended.** Discrete time and the speed
+cap are *coupled*: influence covers `radius × substeps` cells per tick, and a
+cell is `1 / subdivision` of a base length, so refining time without refining
+space raises the physical speed of influence. A creator cannot relax one of
+these limits without paying in another. Nobody set out to build that in, but it
+follows from the definitions on paper and running the model only made it
+visible; see the table above. See `constraints::Resolved`.
 
 ### On the numbers
 
