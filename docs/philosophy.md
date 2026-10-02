@@ -218,10 +218,12 @@ spatially structured.
 
 **What would falsify it within the model:** complexity turning out to be common.
 The fine-tuning claim needs the productive band to be narrow, and a sweep
-finding most laws productive would refute it. The measured answer is 8.9% of the
-distinct laws reachable on average across twenty seeds, ranging from 2.4% to
-19% — a minority in every seed. Seed 42 alone gave the 19%, and was first
-reported as the answer. Two cautions travel with that number: the bar is calibrated from Conway
+finding most laws productive would refute it. Productive laws are a minority
+under every criterion tried, in every seed, so the claim survives in this model.
+How small a minority does not survive scrutiny as a single number. Under the
+Conway-calibrated bar it is 9% on average across twenty seeds; under two
+criteria that never look at Conway, it is 28% to 33%. Seed 42 alone gave the
+19% that was first reported as the answer. Two cautions travel with that number: the bar is calibrated from Conway
 and so measures resemblance rather than worth, and the productive fraction must
 be counted over *distinct laws* rather than grid area, since a neighbourhood of
 eight cells only admits densities k/8 and 441 settings collapse onto 42 laws.

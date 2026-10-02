@@ -371,6 +371,25 @@ fn execute_sweep(
             report::write_sweep_ensemble(&runs, out_dir),
         )?;
     }
+
+    // Does the answer survive a change of criterion, and of which constants
+    // are swept?
+    println!("\n== sensitivity ==\n");
+    let sens = sweep::run_sensitivity(cfg, steps, min, max);
+    print!("{}", report::sensitivity_summary(&sens));
+    let written = report::write_sensitivity(&sens, out_dir)?;
+    println!(
+        "\nwrote {} and {}",
+        written.csv.display(),
+        written.json.display()
+    );
+    if cfg.world.seeds > 1 {
+        let runs = with_rest(cfg, sens, |c| sweep::run_sensitivity(c, steps, min, max));
+        print_ensemble(
+            report::sensitivity_ensemble_summary(&runs),
+            report::write_sensitivity_ensemble(&runs, out_dir),
+        )?;
+    }
     Ok(())
 }
 

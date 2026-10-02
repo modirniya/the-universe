@@ -22,7 +22,7 @@ cargo run --release -- run  --config configs/quick.toml    # small world for ite
 cargo run --release -- nest --config configs/nesting.toml  # Theory 2 chain, <1s
 cargo run --release -- pipe --config configs/pipe.toml     # Theory 3 relay, <1s
 cargo run --release -- detect --config configs/detect.toml # Detection survey, ~10s
-cargo run --release -- sweep  --config configs/sweep.toml  # Theory 6 sweep, ~6s at 21 steps
+cargo run --release -- sweep  --config configs/sweep.toml  # Theory 6 sweep + sensitivity, 20 seeds; ~6s per seed per part on M1
 cargo run --release -- boot   --config configs/boot.toml   # Theory 5 boot chain + gate ablation, ~5s
 cargo run --release -- boot   --config configs/boot-permissive.toml  # low floors: sterility and the gate
 cargo test --workspace                                     # native suite
@@ -135,7 +135,8 @@ From v0.6:
 
 From v0.5:
 
-- 8.9% [2.4%, 19%] of reachable laws are productive across 20 seeds. Seed 42 gave the 19% that was first reported, the maximum. Productivity depends on the initial condition as well as the law.
+- Fine-tuning is a range, not a number: 9% (Conway bar) to 28–33% (compressibility, perturbation growth) across all four constants and 20 seeds. Minority under every criterion. Quote the range.
+- 8.9% [2.4%, 19%] of reachable laws are productive across 20 seeds under the original two-constant Conway sweep. Seed 42 gave the 19% that was first reported, the maximum. Productivity depends on the initial condition as well as the law.
 - **Complexity criteria must be bands, not floors.** An activity floor admitted chaotic rules churning at 20× Conway. Class 3 is not class 4.
 - **Count distinct laws, not grid area.** 441 settings denote 42 laws because only `k/8` densities occur. An area fraction reports the sweep's resolution, not the universe's. `sweep::rule_signature` canonicalises.
 - Raw macro variance nearly tracks density; normalise by the i.i.d. baseline `p(1-p)/cells_per_macro` before calling anything "structure".

@@ -54,7 +54,7 @@ out otherwise, and the ensemble column says how often it did not.
 | Looking conceals lazy rendering | `detector` | follows from rules | A probe forces rendering by definition, so a looking inhabitant only ever reads rendered cells. |
 | A passive reader can find lazy rendering | `detector` | had to be run | 12/20 seeds. |
 | 441 rule settings denote 42 laws | `sweep` | follows from rules | An eight-cell neighbourhood only has densities `k/8`. |
-| A minority of laws is productive | `sweep` | had to be run | 8.9% [2.4%, 19%] across 20 seeds. |
+| A minority of laws is productive | `sweep` | had to be run | Under all three criteria and 20 seeds; the share is 9% to 33% depending on the criterion. |
 | Poorer layers grow fewer bootloaders | `bootloader` | had to be run | Never rises down a chain in 20/20 seeds. |
 | A chain can end for want of life with budget in hand | `bootloader` | follows from rules | The gate forbids a sterile layer to seed; that it binds before space did in 8/20 permissive seeds had to be run. |
 | Bootloaders never change what a child receives | `bootloader` | follows from rules | The child's seed is hashed from the horizon alone; the ablation confirms it in 40/40 chains. |
@@ -507,10 +507,11 @@ distinct laws reachable:           42.0 [42.0, 42.0]
 Conway passed its own bar in 20/20 seeds
 ```
 
-Fine-tuning holds, more strongly than the single seed suggested — a creator
-picking blindly would find an interesting universe about one time in eleven,
-and anywhere from one in five to one in forty depending on the universe the
-laws are tried in. The productivity of a law is not a property of the law
+Fine-tuning holds, more strongly than the single seed suggested — by this bar a
+creator picking blindly would find an interesting universe about one time in
+eleven, and anywhere from one in five to one in forty depending on the universe
+the laws are tried in. The bar itself turns out to matter more than the seed;
+see the sensitivity analysis below. The productivity of a law is not a property of the law
 alone; the same rule is complex from one initial condition and not from
 another.
 
@@ -531,10 +532,48 @@ ranked a regular blinking tiling above Conway. Dividing by what uncorrelated
 noise of the same density would give removes the density dependence: 1 is
 chance, above is clumped, below is more even than chance.
 
-**What this does not show.** The bar is calibrated from Conway, so "productive"
-means *resembling the one setting already believed interesting*. It is a measure
-of resemblance, not of worth. Two constants were swept out of the many a
-universe has, and the band widths were held fixed.
+**What the first sweep could not show.** Its bar is calibrated from Conway, so
+"productive" meant *resembling the one setting already believed interesting*,
+and it swept two of the rule's four constants with the band widths held fixed.
+Both are choices. So the same command now widens the space to all four
+constants, both centres and both half-widths, and scores every law it reaches
+by three criteria:
+
+- **Resembles Conway**, the original bar.
+- **Compressibility**: the final field has between a fifth and four fifths as
+  many runs as noise of the same density, so it is structured but not uniform.
+- **Perturbation growth**: one cell flipped at mid-run neither dies out nor
+  decorrelates more than half the world by the end.
+
+The last two never look at Conway, but their bands were fixed in advance and are
+choices too. Every criterion here encodes a guess about what complexity is.
+
+```
+fine-tuning under three criteria, over every distinct law reachable by sweeping
+both band centres and both half-widths: 289 laws, 42 of them at Conway's widths
+
+across 20 seeds:
+criterion                 conway  conway's widths          all four constants
+----------------------------------------------------------------------------------
+resembles conway           20/20  0.089 [0.024, 0.190]     0.094 [0.021, 0.197]
+compressibility            20/20  0.294 [0.238, 0.357]     0.327 [0.311, 0.346]
+perturbation growth        12/20  0.365 [0.214, 0.476]     0.282 [0.228, 0.322]
+```
+
+**The answer depends on the criterion by a factor of about three and a half.**
+Across all four constants the productive share is 9% under the Conway bar and
+28–33% under the two that do not look at Conway. The Conway bar is the strictest
+in every seed and the most seed-dependent; compressibility barely moves between
+seeds. Every criterion keeps productive laws a minority in every seed, so the
+qualitative claim survives. The number does not: "one in eleven" is a property
+of the criterion as much as of the laws, and an honest summary is "between one
+in ten and one in three, depending on what you count as complex".
+
+Conway passes its own bar and compressibility in every seed, but perturbation
+growth in only 12. In the other eight, the flipped cell's effect has died out
+within the 40 ticks left to it, so by that criterion Conway's own universe can
+look ordered. The widened space reaches the same 289 laws at 11 steps as at 21,
+so its numbers do not depend on the sweep's resolution, unlike the original.
 
 ## v0.6: bootloader life, and the loop closed
 

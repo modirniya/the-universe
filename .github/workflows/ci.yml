@@ -95,6 +95,7 @@ jobs:
           test -s out/pipe/pipe.csv && test -s out/pipe/pipe.json
           test -s out/detect/detection.csv && test -s out/detect/detection.json
           test -s out/sweep/sweep.csv && test -s out/sweep/sweep.json
+          test -s out/sweep/sensitivity.json && test -s out/sweep/sensitivity_ensemble.csv
           test -s out/boot/boot.csv && test -s out/boot/boot.json
           test -s out/boot/gate.csv && test -s out/boot-permissive/gate.csv
           test -s out/ensemble.csv && test -s out/ensemble.json
@@ -306,6 +307,21 @@ jobs:
                   fail.append(f"a chaotic setting was admitted: activity {o['activity']}")
                   break
 
+          # Sensitivity. The Conway criterion at Conway's widths is the sweep
+          # above, exactly; the answer under every criterion stays a minority.
+          sens = json.load(open("out/sweep/sensitivity.json"))
+          crit = {c["criterion"]: c for c in sens["criteria"]}
+          if abs(crit["resembles conway"]["at_conway_widths"] - rf) > 1e-6:
+              fail.append("the sensitivity analysis does not reproduce the sweep")
+          for name in ("resembles conway", "compressibility"):
+              if not crit[name]["conway_admitted"]:
+                  fail.append(f"Conway failed the {name} criterion")
+          for name, c in crit.items():
+              if not 0.0 < c["all_constants"] < 0.5:
+                  fail.append(f"{name}: productive share {c['all_constants']:.3f} outside (0, 0.5)")
+          print(f"sensitivity: {sens['range'][0]*100:.1f}% to {sens['range'][1]*100:.1f}% "
+                f"over {sens['laws']} laws")
+
           print(f"{d['distinct_complex']} of {d['distinct_rules']} distinct laws productive "
                 f"({rf*100:.1f}%), over {len(d['grid'])} settings")
 
@@ -442,6 +458,17 @@ jobs:
           if not 0.0 < hi < 0.5:
               fail.append(f"sweep: productive share reached {hi:.3f}")
           print(f"sweep: highest productive share {hi:.3f} over {len(sweeps)} seeds")
+
+          # Sensitivity across seeds: a minority under every criterion, and
+          # Conway passes the compressibility criterion it never saw.
+          sens = list(csv.DictReader(open("out/sweep/sensitivity_ensemble.csv")))
+          top = max(float(r["all_constants"]) for r in sens)
+          if top >= 0.5:
+              fail.append(f"sensitivity: some criterion reached {top:.3f}")
+          if not all(r["conway_admitted"] == "true" for r in sens
+                     if r["criterion"] == "compressibility"):
+              fail.append("sensitivity: Conway failed compressibility in some seed")
+          print(f"sensitivity: highest share under any criterion {top:.3f}")
 
           # Theory 5. Bootloaders never rise down a chain, in any seed.
           boots = defaultdict(dict)

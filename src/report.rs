@@ -16,7 +16,7 @@ use crate::detector::Finding;
 use crate::experiment::{self, Comparison, Ensemble, Experiment, Spread};
 use crate::layer::Chain;
 use crate::pipe::{self, Relay};
-use crate::sweep::{self, Sweep};
+use crate::sweep::{self, Sensitivity, Sweep};
 use std::fmt::Write as _;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -1893,6 +1893,177 @@ pub fn write_sweep_ensemble(runs: &[(u64, Sweep)], out_dir: &Path) -> io::Result
         );
     }
     write_rows(out_dir, csv)
+}
+
+// ---------------------------------------------------------------------------
+// Theory 6: sensitivity to the criterion
+// ---------------------------------------------------------------------------
+
+fn pct(v: f64) -> String {
+    format!("{:.1}%", v * 100.0)
+}
+
+pub fn sensitivity_summary(sens: &Sensitivity) -> String {
+    let mut s = String::new();
+    let _ = writeln!(
+        s,
+        "fine-tuning under three criteria, over every distinct law reachable by sweeping\n\
+         both band centres and both half-widths: {} laws, {} of them at Conway's widths\n",
+        sens.law_count(false),
+        sens.law_count(true)
+    );
+    let _ = writeln!(
+        s,
+        "{:<22} {:>14} {:>18} {:>18}",
+        "criterion", "conway passes", "conway's widths", "all four constants"
+    );
+    let _ = writeln!(s, "{}", "-".repeat(75));
+    for (i, c) in sens.criteria.iter().enumerate() {
+        let _ = writeln!(
+            s,
+            "{:<22} {:>14} {:>18} {:>18}",
+            c.label(),
+            if c.admits(&sens.conway) { "yes" } else { "no" },
+            pct(sens.fraction(i, true)),
+            pct(sens.fraction(i, false))
+        );
+    }
+    let (lo, hi) = sens.range();
+    let _ = writeln!(
+        s,
+        "\nproductive share of distinct laws, across criteria: {} to {}",
+        pct(lo),
+        pct(hi)
+    );
+    s.push_str(
+        "\nonly the first criterion looks at Conway. the other two have bands fixed in advance,\n\
+         which is a choice too: every criterion here encodes a guess about what complexity is.\n\
+         the spread between them is the honest size of the answer.\n",
+    );
+    s
+}
+
+pub fn write_sensitivity(sens: &Sensitivity, out_dir: &Path) -> io::Result<Written> {
+    std::fs::create_dir_all(out_dir)?;
+    let mut csv = String::from(
+        "signature,conway_widths,final_live,activity,dispersion,compressibility,growth",
+    );
+    for c in &sens.criteria {
+        let _ = write!(csv, ",{}", c.label().replace(' ', "_"));
+    }
+    csv.push('\n');
+    for (sig, fixed, p) in &sens.laws {
+        let _ = write!(
+            csv,
+            "{sig},{fixed},{:.6},{:.8},{:.6},{:.6},{:.6}",
+            p.final_live, p.activity, p.dispersion, p.compressibility, p.growth
+        );
+        for c in &sens.criteria {
+            let _ = write!(csv, ",{}", c.admits(p));
+        }
+        csv.push('\n');
+    }
+
+    let mut json = String::from("{\n");
+    let _ = writeln!(
+        json,
+        "  \"laws\": {}, \"laws_at_conway_widths\": {},",
+        sens.law_count(false),
+        sens.law_count(true)
+    );
+    let (lo, hi) = sens.range();
+    let _ = writeln!(json, "  \"range\": [{}, {}],", json_f64(lo), json_f64(hi));
+    json.push_str("  \"criteria\": [\n");
+    for (i, c) in sens.criteria.iter().enumerate() {
+        let _ = write!(
+            json,
+            "    {{\"criterion\": \"{}\", \"conway_admitted\": {}, \"at_conway_widths\": {}, \
+             \"all_constants\": {}}}",
+            c.label(),
+            c.admits(&sens.conway),
+            json_f64(sens.fraction(i, true)),
+            json_f64(sens.fraction(i, false))
+        );
+        if i + 1 < sens.criteria.len() {
+            json.push(',');
+        }
+        json.push('\n');
+    }
+    json.push_str("  ]\n}\n");
+
+    let csv_path = out_dir.join("sensitivity.csv");
+    let json_path = out_dir.join("sensitivity.json");
+    std::fs::write(&csv_path, csv)?;
+    std::fs::write(&json_path, json)?;
+    Ok(Written {
+        csv: csv_path,
+        json: json_path,
+    })
+}
+
+pub fn sensitivity_ensemble_summary(runs: &[(u64, Sensitivity)]) -> String {
+    let mut s = String::new();
+    let seeds: Vec<u64> = runs.iter().map(|(s, _)| *s).collect();
+    let n = runs.len();
+    ensemble_header(&mut s, &seeds);
+    let Some((_, first)) = runs.first() else {
+        return s;
+    };
+    let _ = writeln!(
+        s,
+        "\n{:<22} {:>9}  {:<24} {:<24}",
+        "criterion", "conway", "conway's widths", "all four constants"
+    );
+    let _ = writeln!(s, "{}", "-".repeat(82));
+    for (i, c) in first.criteria.iter().enumerate() {
+        let passes = runs
+            .iter()
+            .filter(|(_, x)| x.criteria[i].admits(&x.conway))
+            .count();
+        let fixed = Spread::of(runs.iter().map(|(_, x)| x.fraction(i, true)));
+        let all = Spread::of(runs.iter().map(|(_, x)| x.fraction(i, false)));
+        let _ = writeln!(
+            s,
+            "{:<22} {:>9}  {:<24} {:<24}",
+            c.label(),
+            format!("{passes}/{n}"),
+            spread_cell(&fixed, 3),
+            spread_cell(&all, 3)
+        );
+    }
+    let lows = Spread::of(runs.iter().map(|(_, x)| x.range().0));
+    let highs = Spread::of(runs.iter().map(|(_, x)| x.range().1));
+    let _ = writeln!(
+        s,
+        "\nlowest criterion per seed:  {}\nhighest criterion per seed: {}",
+        spread_cell(&lows, 3),
+        spread_cell(&highs, 3)
+    );
+    s.push_str(ENSEMBLE_CLOSER);
+    s
+}
+
+pub fn write_sensitivity_ensemble(
+    runs: &[(u64, Sensitivity)],
+    out_dir: &Path,
+) -> io::Result<PathBuf> {
+    std::fs::create_dir_all(out_dir)?;
+    let mut csv = String::from("seed,criterion,conway_admitted,at_conway_widths,all_constants\n");
+    for (seed, x) in runs {
+        for (i, c) in x.criteria.iter().enumerate() {
+            let _ = writeln!(
+                csv,
+                "{seed},{},{},{:.6},{:.6}",
+                c.label(),
+                c.admits(&x.conway),
+                x.fraction(i, true),
+                x.fraction(i, false)
+            );
+        }
+    }
+    let path = out_dir.join("sensitivity_ensemble.csv");
+    std::fs::write(&path, csv)?;
+    Ok(path)
 }
 
 pub fn boot_ensemble_summary(runs: &[(u64, BootChain)]) -> String {
