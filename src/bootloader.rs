@@ -286,7 +286,12 @@ pub fn boot_seed(messages: &[crate::pipe::Message]) -> Option<u64> {
     }
     let mut acc = Rng::new(0x1F1E_B00D_10AD_E123);
     for m in messages {
-        acc = Rng::derive(acc.next_u64(), m.tick, m.digest, m.magnitude.to_bits());
+        acc = Rng::derive(
+            acc.next_u64(),
+            m.tick(),
+            m.digest(),
+            m.magnitude().to_bits(),
+        );
     }
     Some(acc.next_u64())
 }
@@ -434,6 +439,7 @@ fn scale_horizon(
         width: ((h.width as f64 * sx).round() as usize).clamp(1, spec.width),
         height: ((h.height as f64 * sy).round() as usize).clamp(1, spec.height),
         threshold: h.threshold,
+        bits: h.bits,
     }
 }
 
@@ -659,16 +665,8 @@ mod tests {
 
     #[test]
     fn the_child_seed_depends_on_what_crossed() {
-        let a = [Message {
-            tick: 1,
-            magnitude: 0.4,
-            digest: 99,
-        }];
-        let b = [Message {
-            tick: 1,
-            magnitude: 0.4,
-            digest: 100,
-        }];
+        let a = [Message::pack(1, 0.4, 99, 128)];
+        let b = [Message::pack(1, 0.4, 100, 128)];
         assert_ne!(boot_seed(&a), boot_seed(&b));
         assert_eq!(boot_seed(&a), boot_seed(&a));
     }

@@ -146,7 +146,8 @@ From v0.4:
 
 From v0.3:
 
-- Theory 3's split holds: content is destroyed (50.2% digest avalanche on a one-cell change) while timing and magnitude survive (0.79 correlation) through a channel carrying 5.6% of the information.
+- Theory 3's split is **designed in**: `Message` carries a magnitude and a hashed digest, so "magnitude survives, arrangement does not" is a definition, and the 50.2% avalanche only checks the hash. The measured result is the width curve: 0.82 [0.73, 0.90] correlation at full width across 20 seeds, and 2–6 bits a tick keep 90% of it. The curve dips at 3 bits in every seed, an artefact of uniform quantisation levels; do not claim it is monotone.
+- `Message` fields are private and only the encoded payload is stored. Do not add a field holding the unquantised magnitude: the parent must only ever see what the channel's width allows.
 - **Threshold sweeps manufacture perfect correlations.** The first version of the report showed 1.0000 at a high threshold — from two data points, where Pearson is always ±1. `MIN_CORRELATION_SAMPLES` refuses to print a correlation below five events, and the sweep shows the event count beside every row. Any future statistic computed over a filtered subset needs the same guard.
 
 ## Decisions already made — do not relitigate

@@ -34,6 +34,8 @@ x = 48
 y = 48
 width = 48
 height = 48
+bits = 128   # channel width per tick: an exact magnitude plus a 64-bit digest.
+             # The relay also reads the same child at 1..64 bits regardless.
 
 [report]
 macro_grid = 16

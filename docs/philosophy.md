@@ -100,13 +100,17 @@ into one 128-bit message per tick, whatever its area. Serialization is
 position-sensitive, so the digest depends on the arrangement — and avalanching,
 so it cannot be read back as one.
 
-**What would falsify it within the model:** content structure surviving the
-crossing (the digest tracking the arrangement instead of scattering), or timing
-and magnitude *not* surviving (a parent's view uncorrelated with the child's
-behaviour, meaning the pipe carries nothing at all). Neither happened: a
-one-cell change flips half the digest, while what crossed still tracks the child
-at 0.79 through a channel carrying 5.6% of the information (0.82 on average
-across twenty seeds).
+**What is designed in.** The message has a field for magnitude and a digest
+that is a hash, so "timing and magnitude survive, arrangement does not" is how
+the pipe was built rather than something the run discovered. The avalanche
+test checks the hash, nothing more.
+
+**What would falsify it within the model:** a parent's view uncorrelated with
+the child's behaviour at every channel width, meaning the pipe carries nothing
+at all; or a channel that needs most of the horizon's bits to track the child,
+meaning it is a window rather than a bottleneck. Neither happened. What crossed
+tracks the child at 0.82 on average across twenty seeds, and two or three bits
+a tick usually keep 90% of that.
 
 ---
 

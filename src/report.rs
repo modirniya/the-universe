@@ -15,7 +15,7 @@ use crate::bootloader::{BootChain, BootLayer};
 use crate::detector::Finding;
 use crate::experiment::{self, Comparison, Ensemble, Experiment, Spread};
 use crate::layer::Chain;
-use crate::pipe::{self, Horizon, Relay};
+use crate::pipe::{self, Relay};
 use crate::sweep::{self, Sweep};
 use std::fmt::Write as _;
 use std::io;
@@ -731,7 +731,7 @@ pub fn pipe_to_json(relay: &Relay) -> String {
         s,
         "  \"content_bits\": {}, \"message_bits\": {}, \"compression_ratio\": {:.8},",
         relay.horizon.content_bits(),
-        Horizon::MESSAGE_BITS,
+        relay.horizon.message_bits(),
         relay.horizon.compression_ratio()
     );
     let _ = writeln!(
@@ -754,7 +754,31 @@ pub fn pipe_to_json(relay: &Relay) -> String {
         }
         s.push('\n');
     }
+    s.push_str("  ],\n  \"widths\": [\n");
+    let widths = relay.width_sweep();
+    for (i, w) in widths.iter().enumerate() {
+        let _ = write!(
+            s,
+            "    {{\"bits\": {}, \"levels_seen\": {}, \"correlation\": {}}}",
+            w.bits,
+            w.levels_seen,
+            json_f64(w.correlation)
+        );
+        if i + 1 < widths.len() {
+            s.push(',');
+        }
+        s.push('\n');
+    }
     s.push_str("  ]\n}\n");
+    s
+}
+
+/// The channel-width sweep, one row per width.
+pub fn widths_to_csv(relay: &Relay) -> String {
+    let mut s = String::from("bits,levels_seen,correlation\n");
+    for w in relay.width_sweep() {
+        let _ = writeln!(s, "{},{},{:.6}", w.bits, w.levels_seen, w.correlation);
+    }
     s
 }
 
@@ -764,6 +788,7 @@ pub fn write_pipe(relay: &Relay, out_dir: &Path) -> io::Result<Written> {
     let json = out_dir.join("pipe.json");
     std::fs::write(&csv, pipe_to_csv(relay))?;
     std::fs::write(&json, pipe_to_json(relay))?;
+    std::fs::write(out_dir.join("widths.csv"), widths_to_csv(relay))?;
     Ok(Written { csv, json })
 }
 
@@ -779,7 +804,7 @@ pub fn pipe_summary(relay: &Relay) -> String {
         h.x,
         h.y,
         h.content_bits(),
-        Horizon::MESSAGE_BITS
+        h.message_bits()
     );
     let _ = writeln!(
         s,
@@ -819,6 +844,22 @@ pub fn pipe_summary(relay: &Relay) -> String {
         );
     }
 
+    let _ = writeln!(
+        s,
+        "\nthe same child read through narrower channels at once:\n\n\
+         {:>6}  {:>8}  {:>12}",
+        "bits", "levels", "correlation"
+    );
+    let _ = writeln!(s, "{}", "-".repeat(30));
+    for w in relay.width_sweep() {
+        let corr = if w.correlation.is_nan() {
+            "constant".to_string()
+        } else {
+            format!("{:.4}", w.correlation)
+        };
+        let _ = writeln!(s, "{:>6}  {:>8}  {corr:>12}", w.bits, w.levels_seen);
+    }
+
     s.push('\n');
     s.push_str(&pipe_verdict(relay));
     s
@@ -829,17 +870,30 @@ fn pipe_verdict(relay: &Relay) -> String {
     let a = relay.content_avalanche;
     let c = relay.magnitude_correlation();
 
-    if (0.35..=0.65).contains(&a) {
+    // What is designed in, said first and plainly, so nothing below reads as
+    // a discovery when it is a definition.
+    s.push_str(
+        "designed in, not found: a message has a magnitude and a digest, and the digest\n\
+         is a hash. that magnitude crosses and arrangement scatters follows from that.\n",
+    );
+
+    if a.is_nan() {
         let _ = writeln!(
             s,
-            "content did not survive: a one-cell change scatters the digest, so comparing\n\
-             digests recovers nothing about the arrangement"
+            "no digest crossed at this width, so there was no arrangement to scatter"
+        );
+    } else if (0.35..=0.65).contains(&a) {
+        let _ = writeln!(
+            s,
+            "the fold behaves as a hash ({:.1}% of digest bits flip on a one-cell change):\n\
+             a check on how it was built, not a result about pipes",
+            a * 100.0
         );
     } else {
         let _ = writeln!(
             s,
-            "content partly survived ({a:.3} avalanche) -- the fold is not destroying structure\n\
-             the way a serializing write should"
+            "the fold does NOT behave as a hash ({a:.3} avalanche): the digest leaks the\n\
+             arrangement, and the pipe is not the serializing write it claims to be"
         );
     }
 
@@ -848,19 +902,24 @@ fn pipe_verdict(relay: &Relay) -> String {
             s,
             "magnitude carried nothing measurable: the child never varied"
         );
-    } else if c.abs() >= 0.5 {
-        let _ = writeln!(
-            s,
-            "timing and magnitude did survive: what crossed tracks the child at {c:.4}, from a\n\
-             channel carrying {:.2}% of the information",
-            relay.horizon.compression_ratio() * 100.0
-        );
     } else {
         let _ = writeln!(
             s,
-            "timing and magnitude survived only weakly ({c:.4}); the keyhole is a poor guide to\n\
-             the room"
+            "\nmeasured: what crossed tracks the child at {c:.4}, from a channel carrying\n\
+             {:.2}% of the information",
+            relay.horizon.compression_ratio() * 100.0
         );
+        match relay.width_for(0.9) {
+            Some(bits) => {
+                let _ = writeln!(
+                    s,
+                    "measured: {bits} bits per tick are enough to keep 90% of that correlation"
+                );
+            }
+            None => {
+                let _ = writeln!(s, "no narrower channel kept 90% of that correlation");
+            }
+        }
     }
 
     // Where the parent stops seeing anything at all.
@@ -1578,6 +1637,26 @@ pub fn pipe_ensemble_summary(runs: &[(u64, Relay)]) -> String {
     );
     let _ = writeln!(
         s,
+        "narrowest width keeping 90% of the full correlation: {}",
+        spread_cell(
+            &Spread::of(
+                runs.iter()
+                    .map(|(_, r)| r.width_for(0.9).map_or(f64::NAN, f64::from))
+            ),
+            1
+        )
+    );
+    let _ = writeln!(s, "\n{:>6}  {:<30}", "bits", "correlation: mean [min, max]");
+    let _ = writeln!(s, "{}", "-".repeat(40));
+    for (i, &bits) in pipe::WIDTHS.iter().enumerate() {
+        let sp = Spread::of(
+            runs.iter()
+                .map(|(_, r)| r.width_sweep().get(i).map_or(f64::NAN, |w| w.correlation)),
+        );
+        let _ = writeln!(s, "{:>6}  {:<30}", bits, spread_cell(&sp, 3));
+    }
+    let _ = writeln!(
+        s,
         "\n{:>10}  {:<28}",
         "threshold", "registers: mean [min, max]"
     );
@@ -1591,13 +1670,15 @@ pub fn pipe_ensemble_summary(runs: &[(u64, Relay)]) -> String {
 }
 
 pub fn write_pipe_ensemble(runs: &[(u64, Relay)], out_dir: &Path) -> io::Result<PathBuf> {
-    let mut csv = String::from("seed,content_avalanche,magnitude_correlation\n");
+    let mut csv = String::from("seed,content_avalanche,magnitude_correlation,width_for_90\n");
     for (seed, r) in runs {
         let _ = writeln!(
             csv,
-            "{seed},{:.6},{:.6}",
+            "{seed},{:.6},{:.6},{}",
             r.content_avalanche,
-            r.magnitude_correlation()
+            r.magnitude_correlation(),
+            r.width_for(0.9)
+                .map_or("NaN".to_string(), |b| b.to_string())
         );
     }
     write_rows(out_dir, csv)
@@ -1884,12 +1965,14 @@ mod tests {
     #[test]
     fn pipe_csv_is_rectangular() {
         let relay = Relay {
-            horizon: Horizon::default(),
+            horizon: crate::pipe::Horizon::default(),
             received: crate::pipe::WriteEnd::new().seal(),
             child_truth: vec![0.1, 0.2, 0.3],
             content_avalanche: 0.5,
+            by_width: Vec::new(),
         };
         assert_rectangular(&pipe_to_csv(&relay), PIPE_COLUMNS.len());
+        assert_rectangular(&widths_to_csv(&relay), 3);
     }
 
     #[test]

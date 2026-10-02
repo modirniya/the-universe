@@ -76,7 +76,7 @@ under a second each. `configs/quick.toml` is a much smaller world for iterating
 on code — too short to draw conclusions from, and a single seed.
 
 ```sh
-cargo test --workspace              # 220 tests, most of them on the physics
+cargo test --workspace              # 229 tests, most of them on the physics
 cargo run --release -- --help
 ```
 
@@ -242,9 +242,16 @@ omission rather than a claim.
 ## v0.3: the pipe
 
 Theory 3 says a black hole is a one-way serializing channel: content structure
-is destroyed, but *timing and magnitude* may survive. Both halves are testable,
-and they pull in opposite directions — a channel that preserved everything
-would not be a pipe, and one that preserved nothing would carry no signal.
+is destroyed, but *timing and magnitude* may survive.
+
+**Most of that split is designed in, not found.** A message here has a slot per
+tick, a field for magnitude, and a digest built by hashing every cell. So timing
+and magnitude cross because the message was built to carry them, and the
+arrangement scatters because hashes scatter. An earlier version of this section
+presented both halves as tested; they are definitions. What does have to be run
+to be known is *how much* of the child a parent can still track, and how narrow
+the channel can get before that is lost. The channel's width is now a dial,
+`horizon.bits`, and the relay reads the same child through ten widths at once.
 
 ```sh
 cargo run --release -- pipe --config configs/pipe.toml
@@ -266,15 +273,41 @@ timing and magnitude: correlation 0.7884 between what crossed and what the child
       0.50        0.0%         0  too few (<5)
 ```
 
-**Content did not survive.** Changing one cell of the horizon flips 50.2% of
-the digest's bits — the signature of a hash. No amount of comparing what came
-out recovers the arrangement that went in.
+Across 20 seeds, the same child read through narrower channels:
 
-**Timing and magnitude did.** What crossed tracks the child's global behaviour
-at 0.79, through a channel carrying 5.6% of the information. Across 20 seeds the
-correlation is 0.82 [0.73, 0.90], and the avalanche 0.500 [0.493, 0.508]. Theory 3's split
-survives contact with an implementation: the pipe destroys the *what* while
-preserving the *when* and the *how much*.
+```
+narrowest width keeping 90% of the full correlation: 2.5 [2.0, 6.0]
+
+  bits  correlation: mean [min, max]
+----------------------------------------
+     1  n/a
+     2  0.810 [0.599, 0.952]
+     3  0.536 [0.392, 0.682]
+     4  0.793 [0.639, 0.877]
+     6  0.820 [0.728, 0.893]
+     8  0.824 [0.729, 0.896]
+   128  0.824 [0.728, 0.896]
+```
+
+**The avalanche is a check, not a finding.** One changed cell flips 50.2% of the
+digest's bits (0.500 [0.493, 0.508] across seeds). That confirms the fold was
+built as a hash. It would be alarming if it failed; it says nothing about pipes
+when it passes.
+
+**The finding is how little has to cross.** At full width what crossed tracks
+the child at 0.79 at seed 42, and 0.82 [0.73, 0.90] across 20 seeds. Two or
+three bits per tick usually keep 90% of that, and no seed needed more than six
+— under 0.3% of what a faithful description of the horizon would take. A parent
+learns most of what it ever will about the child's activity from a few bits a
+tick, because the child's occupancy is a slowly varying aggregate.
+
+**The curve is not monotone, and that is a caution.** Three bits track the
+child worse than two in every seed. Magnitude is rounded onto evenly spaced
+levels over [0, 1], and the horizon's occupancy lives near the bottom of that
+range, so where the levels happen to fall matters more than how many there are.
+The shape of the curve at its narrow end is partly a property of the encoding,
+and a different one would draw it differently. At one bit nothing varies: the
+horizon is never half full, so the single level never trips.
 
 **Mutual blindness is enforced by the compiler, not by convention.** The child
 holds a `WriteEnd`, which has `write` and nothing else — no method returns

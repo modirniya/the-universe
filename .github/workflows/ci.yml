@@ -191,6 +191,17 @@ jobs:
           if d["compression_ratio"] >= 0.10:
               fail.append(f"channel carries {d['compression_ratio']:.3f}, too wide to be a bottleneck")
 
+          # The measured half: how narrow the channel can get. The widest row
+          # is the pipe as it always was, and a few bits must keep 90% of it.
+          widths = d["widths"]
+          widest = widths[-1]
+          if widest["bits"] != 128 or abs(widest["correlation"] - corr) > 1e-6:
+              fail.append("the 128-bit row is not the pipe's own correlation")
+          enough = [w["bits"] for w in widths
+                    if w["correlation"] is not None and w["correlation"] >= 0.9 * corr]
+          if not enough or min(enough) > 8:
+              fail.append(f"no channel of 8 bits or fewer kept 90%: {enough}")
+
           # Raising the threshold must never reveal more.
           vis = [float(r["visible_fraction"]) for r in rows]
           for a, b in zip(vis, vis[1:]):
@@ -381,7 +392,11 @@ jobs:
               fail.append(f"pipe: magnitude correlation fell to {lo:.3f} in some seed")
           if not all(0.45 <= a <= 0.55 for a in av):
               fail.append("pipe: avalanche left [0.45, 0.55] in some seed")
-          print(f"pipe: worst correlation {lo:.3f} over {len(pipes)} seeds")
+          w90 = [float(r["width_for_90"]) for r in pipes]
+          if not all(w <= 8 for w in w90):
+              fail.append(f"pipe: some seed needed more than 8 bits for 90%: {max(w90)}")
+          print(f"pipe: worst correlation {lo:.3f}, widest 90% width {max(w90):.0f} bits, "
+                f"over {len(pipes)} seeds")
 
           # Detection. Per gaze and limit, the share of seeds where it was found.
           found = defaultdict(lambda: [0, 0])

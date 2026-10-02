@@ -180,6 +180,13 @@ impl Config {
                     .into(),
             );
         }
+        if !(1..=crate::pipe::MAX_BITS).contains(&self.horizon.bits) {
+            return bad(format!(
+                "horizon.bits must be in [1, {}], got {}",
+                crate::pipe::MAX_BITS,
+                self.horizon.bits
+            ));
+        }
         if self.horizon.x >= self.world.width || self.horizon.y >= self.world.height {
             return bad("horizon origin lies outside the world".into());
         }
