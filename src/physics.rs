@@ -15,7 +15,7 @@
 //! Falsified within the model if: the bands stop reducing to B3/S23 at radius
 //! 1, or a step mutates its input world.
 
-use crate::constraints::Resolved;
+use crate::constraints::{CoarseRule, Resolved};
 use crate::space::World;
 use serde::Deserialize;
 
@@ -144,16 +144,102 @@ fn block_neighborhood_density(w: &World, b: usize) -> (f64, u64) {
     }
 }
 
+/// Share of a cell's neighbour reads that land inside its own block, for a
+/// block `edge` cells wide and a neighbourhood of this `radius`.
+///
+/// Averaged over every cell of the block along one axis and squared for two.
+/// The cell's own exclusion from its neighbourhood is ignored, which
+/// overstates the share by under `1 / (2r+1)^2`. Integer arithmetic and one
+/// division, so it is the same number on every target.
+pub fn own_share(edge: usize, radius: usize) -> f64 {
+    if edge == 0 {
+        return 0.0;
+    }
+    let span = 2 * radius + 1;
+    let inside: usize = (0..edge)
+        .map(|i| {
+            let lo = i.saturating_sub(radius);
+            let hi = (i + radius).min(edge - 1);
+            hi - lo + 1
+        })
+        .sum();
+    let axis = inside as f64 / (edge * span) as f64;
+    axis * axis
+}
+
+/// Probability that a binomial count of `n` independent neighbours, each alive
+/// with probability `p`, has a density inside the band `[lo, hi]`.
+///
+/// Written with multiplications and one running binomial coefficient rather
+/// than `powf` or a log-gamma, because transcendental functions are not
+/// guaranteed bit-identical across targets and this number feeds the golden
+/// fingerprint.
+pub fn band_probability(n: u64, p: f64, lo: f64, hi: f64) -> f64 {
+    if n == 0 {
+        return 0.0;
+    }
+    let p = p.clamp(0.0, 1.0);
+    let q = 1.0 - p;
+    // p^k and q^(n-k) by repeated multiplication.
+    let mut pk = vec![1.0f64; n as usize + 1];
+    let mut qk = vec![1.0f64; n as usize + 1];
+    for k in 1..=n as usize {
+        pk[k] = pk[k - 1] * p;
+        qk[k] = qk[k - 1] * q;
+    }
+    let mut total = 0.0;
+    let mut choose = 1.0f64;
+    for k in 0..=n {
+        if k > 0 {
+            choose = choose * (n - k + 1) as f64 / k as f64;
+        }
+        let d = k as f64 / n as f64;
+        if d >= lo && d <= hi {
+            total += choose * pk[k as usize] * qk[(n - k) as usize];
+        }
+    }
+    total.clamp(0.0, 1.0)
+}
+
+/// Expected next density of a block under the binomial mean field.
+///
+/// `d` is the block's own density, `nd` the mean of its neighbouring blocks,
+/// and `share` the fraction of neighbour reads that stay inside the block, so
+/// the effective neighbour density is a weighted mix of the two.
+pub fn binomial_next(rules: &Rules, d: f64, nd: f64, share: f64, neighbours: u64) -> f64 {
+    let p = share * d + (1.0 - share) * nd;
+    let born = band_probability(neighbours, p, rules.birth_lo, rules.birth_hi);
+    let survives = band_probability(neighbours, p, rules.survive_lo, rules.survive_hi);
+    ((1.0 - d) * born + d * survives).clamp(0.0, 1.0)
+}
+
+/// The shipped v0.1–v0.9 closure: the rule's indicator applied to the
+/// neighbouring blocks' mean. See [`CoarseRule::Indicator`] for why it is
+/// kept and why it is no longer the default.
+pub fn indicator_next(rules: &Rules, d: f64, nd: f64) -> f64 {
+    let mut nd_new = 0.0;
+    if rules.born(nd) {
+        nd_new += 1.0 - d;
+    }
+    if rules.survives(nd) {
+        nd_new += d;
+    }
+    nd_new.clamp(0.0, 1.0)
+}
+
 /// One substep of physics over the whole world.
 ///
 /// Resolved blocks advance cell by cell. Unresolved blocks advance as a single
-/// density under a mean-field version of the same rule: the expected outcome
-/// if the block's occupants were spread evenly. That approximation is crude on
-/// purpose — coarse graining is supposed to lose something, and how much it
-/// loses is precisely what the experiment measures.
+/// density under the closure [`Resolved::coarse_rule`] names — a binomial mean
+/// field by default, the indicator closure the first nine milestones used, or
+/// a frozen density. Which closure stands in for unobserved ground is an
+/// assumption, and the Theory 1 experiment runs every lazy setting under all
+/// three so that no finding about lazy rendering rests on one of them unseen.
 pub fn step(w: &World, rules: &Rules, res: &Resolved) -> (World, Work) {
     let mut next = w.clone();
     let mut work = Work::default();
+    let share = own_share(w.geom.block, res.radius);
+    let neighbours = res.neighbours();
 
     for b in 0..w.geom.blocks() {
         if w.resolved[b] {
@@ -169,18 +255,21 @@ pub fn step(w: &World, rules: &Rules, res: &Resolved) -> (World, Work) {
             }
             next.coarse[b] = next.density_from_cells(b);
         } else {
-            let (nd, visits) = block_neighborhood_density(w, b);
             let d = w.coarse[b];
-            let mut nd_new = 0.0;
-            if rules.born(nd) {
-                nd_new += 1.0 - d;
-            }
-            if rules.survives(nd) {
-                nd_new += d;
-            }
-            next.coarse[b] = nd_new.clamp(0.0, 1.0);
             work.block_updates += 1;
-            work.neighbor_visits += visits;
+            next.coarse[b] = match res.coarse_rule {
+                CoarseRule::Frozen => d,
+                CoarseRule::Indicator => {
+                    let (nd, visits) = block_neighborhood_density(w, b);
+                    work.neighbor_visits += visits;
+                    indicator_next(rules, d, nd)
+                }
+                CoarseRule::Binomial => {
+                    let (nd, visits) = block_neighborhood_density(w, b);
+                    work.neighbor_visits += visits;
+                    binomial_next(rules, d, nd, share, neighbours)
+                }
+            };
         }
     }
 
@@ -216,6 +305,7 @@ mod tests {
             radius,
             block_size: 8,
             lazy: false,
+            coarse_rule: CoarseRule::Binomial,
         }
     }
 
@@ -346,6 +436,73 @@ mod tests {
         assert_eq!(work.cell_updates, 0);
         assert_eq!(work.block_updates, w.geom.blocks() as u64);
         assert_eq!(work.neighbor_visits, w.geom.blocks() as u64 * 8);
+    }
+
+    #[test]
+    fn a_frozen_block_reads_no_neighbours_and_keeps_its_density() {
+        let mut w = world_from(32, 32, &[(5, 5)]);
+        for b in 0..w.geom.blocks() {
+            w.resolved[b] = false;
+            w.coarse[b] = 0.37;
+        }
+        let mut res = full_res(1);
+        res.coarse_rule = CoarseRule::Frozen;
+        let (next, work) = step(&w, &Rules::default(), &res);
+        assert_eq!(work.neighbor_visits, 0);
+        assert_eq!(work.block_updates, w.geom.blocks() as u64);
+        assert!(next.coarse.iter().all(|d| *d == 0.37));
+    }
+
+    #[test]
+    fn band_probability_is_a_probability_and_sums_to_one_over_the_full_band() {
+        for p in [0.0, 0.1, 0.3, 0.5, 0.9, 1.0] {
+            let all = band_probability(8, p, 0.0, 1.0);
+            assert!((all - 1.0).abs() < 1e-12, "p={p}: {all}");
+            let some = band_probability(8, p, 0.3125, 0.4375);
+            assert!((0.0..=1.0).contains(&some));
+        }
+        // Exactly three of eight at p = 0.5 is C(8,3) / 256.
+        let three = band_probability(8, 0.5, 0.3125, 0.4375);
+        assert!((three - 56.0 / 256.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn the_binomial_mean_field_is_smooth_where_the_indicator_jumps() {
+        // The audit's complaint, pinned. Nudging the neighbour density across
+        // the birth band's edge moves the indicator closure from "keep d" to
+        // "saturate"; the binomial closure barely moves.
+        let r = Rules::default();
+        let (lo, hi) = (indicator_next(&r, 0.3, 0.31), indicator_next(&r, 0.3, 0.32));
+        assert_eq!(lo, 0.3);
+        assert_eq!(hi, 1.0);
+        let (blo, bhi) = (
+            binomial_next(&r, 0.3, 0.31, 0.8, 8),
+            binomial_next(&r, 0.3, 0.32, 0.8, 8),
+        );
+        assert!((blo - bhi).abs() < 0.01, "{blo} vs {bhi}");
+    }
+
+    #[test]
+    fn the_binomial_mean_field_of_life_has_the_known_fixed_point() {
+        // The mean-field approximation of B3/S23 is known to settle near 0.37
+        // rather than decaying as Life does. That it does so here is a check on
+        // the arithmetic; that it differs from Life is the approximation's
+        // documented failure, and is what the Theory 1 experiment measures.
+        let r = Rules::default();
+        let mut d = 0.3;
+        for _ in 0..200 {
+            d = binomial_next(&r, d, d, 1.0, 8);
+        }
+        assert!((0.35..0.40).contains(&d), "fixed point at {d}");
+    }
+
+    #[test]
+    fn own_share_is_a_fraction_that_grows_with_the_block() {
+        assert_eq!(own_share(0, 1), 0.0);
+        let small = own_share(4, 1);
+        let big = own_share(32, 1);
+        assert!(small > 0.0 && small < big && big < 1.0, "{small} {big}");
+        assert!(own_share(16, 1) > own_share(16, 3));
     }
 
     #[test]

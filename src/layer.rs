@@ -125,9 +125,9 @@ pub const STERILE_CHURN: f64 = 0.001;
 ///
 /// Not an estimate. It lays out the same geometry the run will use and counts
 /// what each block costs: an observed block pays per cell, an unobserved one
-/// pays eight visits however large it is. That is the whole of lazy rendering's
-/// arithmetic, so the number here is what the layer actually spends, which is
-/// what makes it usable as a budget check rather than a guess.
+/// pays [`Resolved::coarse_visits`] however large it is. That is the whole of
+/// lazy rendering's arithmetic, so the number here is what the layer actually
+/// spends, which is what makes it usable as a budget check rather than a guess.
 ///
 /// The probe must be the one that layer will run with, not the root's: a
 /// smaller world observed by an unscaled probe would resolve a quite different
@@ -135,7 +135,7 @@ pub const STERILE_CHURN: f64 = 0.001;
 pub fn predict_work(spec: &LayerSpec, probe: &Probe, cfg: &Config) -> u64 {
     let res = Resolved::new(&Constraints::ALL_ON, &cfg.params);
     let geom = Geometry::new(spec.width, spec.height, res.subdivision, res.block_size);
-    let neighbours = ((2 * res.radius + 1) * (2 * res.radius + 1) - 1) as u64;
+    let neighbours = res.neighbours();
     let observed = probe.observed_blocks(&geom);
 
     let per_substep: u64 = (0..geom.blocks())
@@ -143,7 +143,7 @@ pub fn predict_work(spec: &LayerSpec, probe: &Probe, cfg: &Config) -> u64 {
             if observed[b] {
                 geom.block_cells(b) as u64 * neighbours
             } else {
-                8
+                res.coarse_visits()
             }
         })
         .sum();

@@ -200,7 +200,7 @@ pub fn paired(a: &[f64], b: &[f64]) -> Summary {
 /// `NaN` if the null has no spread or fewer than two members.
 pub fn z_score(x: f64, null: &[f64]) -> f64 {
     let s = Summary::of(null.iter().copied());
-    if s.n < 2 || !(s.sd > 0.0) {
+    if s.n < 2 || s.sd.is_nan() || s.sd <= 0.0 {
         return f64::NAN;
     }
     (x - s.mean) / s.sd

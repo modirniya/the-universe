@@ -20,6 +20,7 @@ substeps = 2
 capped_radius = 1
 uncapped_radius = 3
 block_size = 16
+coarse_rule = "binomial"  # what stands in for unobserved ground: binomial (mean field), indicator (v0.9), or frozen
 
 [observer]
 x = 16

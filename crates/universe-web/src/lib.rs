@@ -21,7 +21,7 @@
 //! experiment requires. A visitor toggling a limit sees the same universe under
 //! different physics, not a different universe.
 
-use universe_core::constraints::{Constraints, Params, Resolved};
+use universe_core::constraints::{CoarseRule, Constraints, Params, Resolved};
 use universe_core::observer::{Probe, observe};
 use universe_core::physics::{Rules, Work, tick};
 use universe_core::space::{Geometry, World};
@@ -79,6 +79,7 @@ impl Sim {
             capped_radius: 1,
             uncapped_radius: 3,
             block_size: block_size.max(2),
+            coarse_rule: CoarseRule::default(),
         };
         let constraints = Constraints::ALL_ON;
         let probe = Probe {

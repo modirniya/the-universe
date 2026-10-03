@@ -21,7 +21,9 @@
 //! - [`space`] — discrete space, and two-fidelity storage
 //! - [`physics`] — the laws, as pure functions
 //! - [`observer`] — probes, and the render/collapse events
-//! - [`experiment`] — the benchmark that compares constrained to unconstrained
+//! - [`observables`] — what an outside observer can measure, as a vector
+//! - [`experiment`] — running one universe, and running many
+//! - [`limits`] — Theory 1 as a factorial experiment against four nulls
 //! - [`layer`] — nesting: layers hosting layers, each poorer than its host
 //! - [`pipe`] — the one-way serializing channel between layers
 //! - [`detector`] — whether an inhabitant can find the limits from inside
@@ -52,6 +54,8 @@ pub mod detector;
 pub mod experiment;
 pub mod golden;
 pub mod layer;
+pub mod limits;
+pub mod observables;
 pub mod observer;
 pub mod physics;
 pub mod pipe;

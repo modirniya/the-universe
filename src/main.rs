@@ -8,7 +8,7 @@ use universe_core::bootloader::{self, Gate};
 use universe_core::budget::Budget;
 use universe_core::config::Config;
 use universe_core::detector::{self, Gaze, Inhabitant};
-use universe_core::{experiment, layer, pipe, report, sweep};
+use universe_core::{experiment, layer, limits, pipe, report, sweep};
 
 const USAGE: &str = "\
 the-universe — a runnable model of a simulation-hypothesis framework
@@ -23,8 +23,9 @@ USAGE:
     the-universe edge  --config <FILE> [OPTIONS]
 
 COMMANDS:
-    run     Compare an unconstrained universe against one with each limit in
-            force, and report what the limits cost and what they changed.
+    run     Run every setting of the four limits against the unconstrained
+            universe and four null models, and report what each setting
+            costs and how far it moves seven macro-scale observables.
             (Theory 1: limits as optimizations.)
 
     nest    Build a chain of universes, each running on a fraction of its
@@ -510,47 +511,52 @@ fn execute_pipe(cfg: &Config, out_dir: &Path) -> Result<(), Box<dyn std::error::
 
 fn execute_run(cfg: &Config, out_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
     println!(
-        "universe: {}x{} base cells, {} ticks, seed {}",
-        cfg.world.width, cfg.world.height, cfg.world.ticks, cfg.world.seed
+        "universe: {}x{} base cells, {} ticks, seed {}; unobserved ground closes under '{}'",
+        cfg.world.width,
+        cfg.world.height,
+        cfg.world.ticks,
+        cfg.world.seed,
+        cfg.params.coarse_rule.label()
     );
     println!(
-        "probe: fixed {}x{} window at ({}, {}), covering {:.1}% of the world\n",
+        "probe: fixed {}x{} window at ({}, {}), covering {:.1}% of the world",
         cfg.observer.width,
         cfg.observer.height,
         cfg.observer.x,
         cfg.observer.y,
         cfg.observer.coverage(cfg.world.width, cfg.world.height) * 100.0
     );
+    println!(
+        "design: all 16 settings of the four limits, 4 nulls, and the lazy settings under the\n\
+         other two closures -- 24 universes per seed\n"
+    );
 
     if cfg.world.seeds == 1 {
-        let exp = experiment::run_all(cfg, |label| {
-            println!("  running {label} ...");
-        });
-
+        let f = limits::run_factorial(cfg, |label| println!("  running {label} ..."));
         println!();
-        print!("{}", report::summary(&exp));
-
-        let written = report::write(&exp, out_dir)?;
+        print!("{}", report::limits::summary(&f));
+        let written = report::limits::write(&f, out_dir)?;
         println!(
-            "\nwrote {} and {}",
+            "\nwrote {}, {} and {}",
             written.csv.display(),
-            written.json.display()
+            written.json.display(),
+            out_dir.join("divergence_trace.csv").display()
         );
         return Ok(());
     }
 
-    let ens = experiment::run_ensemble(cfg, |seed| {
+    let ens = limits::run_ensemble(cfg, |seed| {
         println!("  running every setting at seed {seed} ...");
     });
     let pinned = &ens.runs[0].1;
 
     println!("\npinned seed {}:\n", ens.runs[0].0);
-    print!("{}", report::summary(pinned));
+    print!("{}", report::limits::summary(pinned));
     println!();
-    print!("{}", report::ensemble_summary(&ens));
+    print!("{}", report::limits::ensemble_summary(&ens));
 
-    let written = report::write(pinned, out_dir)?;
-    let ensemble = report::write_ensemble(&ens, out_dir)?;
+    let written = report::limits::write(pinned, out_dir)?;
+    let ensemble = report::limits::write_ensemble(&ens, out_dir)?;
     println!(
         "\nwrote {}, {}, {} and {}",
         written.csv.display(),
