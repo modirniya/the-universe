@@ -4,7 +4,7 @@
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use universe_core::bootloader;
+use universe_core::bootloader::{self, Gate};
 use universe_core::budget::Budget;
 use universe_core::config::Config;
 use universe_core::detector::{self, Gaze, Inhabitant};
@@ -20,6 +20,7 @@ USAGE:
     the-universe detect --config <FILE> [OPTIONS]
     the-universe sweep --config <FILE> [OPTIONS]
     the-universe boot  --config <FILE> [OPTIONS]
+    the-universe edge  --config <FILE> [OPTIONS]
 
 COMMANDS:
     run     Compare an unconstrained universe against one with each limit in
@@ -48,12 +49,20 @@ COMMANDS:
             budget, or for want of anything alive enough to boot with.
             (Theory 5: bootloader life.)
 
+    edge    Run the boot chain across a grid of degradation fractions and
+            size floors, with and without the bootloader gate, and map why
+            each chain stopped: budget, space, or sterility alone.
+            (Theories 2 and 5: where poverty and sterility meet.)
+
 OPTIONS:
     --config <FILE>   Universe definition (TOML). Required.
     --out <DIR>       Where to write the report.
                       Defaults to the config's report.out_dir.
     --seed <N>        Override world.seed. Same seed, same universe.
     --ticks <N>       Override world.ticks.
+    --seeds <N>       Override world.seeds: run an ensemble of N universes,
+                      the pinned seed first, and summarise each finding
+                      across them. One seed is an example, not a finding.
     --budget <N>      nest only: root layer's work budget, in neighbour
                       visits. Defaults to what the root world costs.
     --steps <N>       sweep only: grid resolution per axis. Default 21.
@@ -87,6 +96,7 @@ struct Args {
     out: Option<PathBuf>,
     seed: Option<u64>,
     ticks: Option<u64>,
+    seeds: Option<usize>,
     budget: Option<u64>,
     steps: Option<usize>,
 }
@@ -105,6 +115,8 @@ enum Command {
     Sweep,
     /// Theory 5: a chain booted from inside, layer by layer.
     Boot,
+    /// Theories 2 and 5: where a chain dies of poverty and where of sterility.
+    Edge,
 }
 
 /// `Ok(None)` means help was requested.
@@ -123,9 +135,10 @@ fn parse(argv: Vec<String>) -> Result<Option<Args>, String> {
         "detect" => Command::Detect,
         "sweep" => Command::Sweep,
         "boot" => Command::Boot,
+        "edge" => Command::Edge,
         other => {
             return Err(format!(
-                "unknown command `{other}`; the commands are `run`, `nest`, `pipe`, `detect`, `sweep` and `boot`"
+                "unknown command `{other}`; the commands are `run`, `nest`, `pipe`, `detect`, `sweep`, `boot` and `edge`"
             ));
         }
     };
@@ -134,6 +147,7 @@ fn parse(argv: Vec<String>) -> Result<Option<Args>, String> {
     let mut out = None;
     let mut seed = None;
     let mut ticks = None;
+    let mut seeds = None;
     let mut budget = None;
     let mut steps = None;
 
@@ -157,6 +171,13 @@ fn parse(argv: Vec<String>) -> Result<Option<Args>, String> {
                         .map_err(|_| format!("`--ticks {v}` is not a number"))?,
                 );
             }
+            "--seeds" => {
+                let v = value()?;
+                seeds = Some(
+                    v.parse()
+                        .map_err(|_| format!("`--seeds {v}` is not a number"))?,
+                );
+            }
             "--steps" => {
                 if command != Command::Sweep {
                     return Err("`--steps` applies to `sweep`, not other commands".into());
@@ -168,7 +189,7 @@ fn parse(argv: Vec<String>) -> Result<Option<Args>, String> {
                 );
             }
             "--budget" => {
-                if !matches!(command, Command::Nest | Command::Boot) {
+                if !matches!(command, Command::Nest | Command::Boot | Command::Edge) {
                     return Err("`--budget` applies to `nest` and `boot`, not `run`".into());
                 }
                 let v = value()?;
@@ -194,6 +215,7 @@ fn parse(argv: Vec<String>) -> Result<Option<Args>, String> {
         out,
         seed,
         ticks,
+        seeds,
         budget,
         steps,
     }))
@@ -206,6 +228,9 @@ fn execute(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
     }
     if let Some(t) = args.ticks {
         cfg.world.ticks = t;
+    }
+    if let Some(n) = args.seeds {
+        cfg.world.seeds = n;
     }
     cfg.validate()?;
 
@@ -221,7 +246,60 @@ fn execute(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
         Command::Detect => execute_detect(&cfg, &out_dir),
         Command::Sweep => execute_sweep(&cfg, &out_dir, args.steps),
         Command::Boot => execute_boot(&cfg, &out_dir, args.budget),
+        Command::Edge => execute_edge(&cfg, &out_dir, args.budget),
     }
+}
+
+/// Every ensemble member after the pinned one, with the pinned result put back
+/// in front. The pinned seed was already run on its own, with its progress
+/// printed, so it is not run twice.
+fn with_rest<T: Send>(cfg: &Config, pinned: T, f: impl Fn(&Config) -> T + Sync) -> Vec<(u64, T)> {
+    let mut all = vec![(cfg.world.seed, pinned)];
+    if cfg.world.seeds > 1 {
+        let mut rest = cfg.clone();
+        rest.world.seed = cfg.world.seed.wrapping_add(cfg.world.seed_stride);
+        rest.world.seeds = cfg.world.seeds - 1;
+        println!("\nrunning {} more seeds ...", rest.world.seeds);
+        all.extend(experiment::per_seed(&rest, f));
+    }
+    all
+}
+
+fn print_ensemble(summary: String, written: std::io::Result<PathBuf>) -> std::io::Result<()> {
+    println!();
+    print!("{summary}");
+    println!("\nwrote {}", written?.display());
+    Ok(())
+}
+
+fn execute_edge(
+    cfg: &Config,
+    out_dir: &Path,
+    budget_override: Option<u64>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let root_spec = layer::LayerSpec {
+        width: cfg.world.width,
+        height: cfg.world.height,
+        ticks: cfg.world.ticks,
+    };
+    let root_budget = Budget::new(
+        budget_override.unwrap_or_else(|| layer::predict_work(&root_spec, &cfg.observer, cfg)),
+    );
+    println!(
+        "root universe: {}x{} base cells, {} ticks, seed {}; viable_work held at {}\n",
+        cfg.world.width, cfg.world.height, cfg.world.ticks, cfg.world.seed, cfg.nesting.viable_work
+    );
+
+    let cells = bootloader::map_endings(cfg, root_budget);
+    print!("{}", report::edge_summary(&cells));
+
+    let runs = with_rest(cfg, cells, |c| bootloader::map_endings(c, root_budget));
+    if runs.len() > 1 {
+        println!();
+        print!("{}", report::edge_ensemble_summary(&runs));
+    }
+    println!("\nwrote {}", report::write_edge(&runs, out_dir)?.display());
+    Ok(())
 }
 
 fn execute_boot(
@@ -260,6 +338,36 @@ fn execute_boot(
         written.csv.display(),
         written.json.display()
     );
+
+    // The ablation: the same chain with the bootloader gate removed.
+    let ungated =
+        bootloader::run_boot_chain_with(cfg, root_budget, &cfg.nesting, Gate::Open, |_, _| {});
+    println!();
+    print!("{}", report::gate_ablation(&chain, &ungated));
+    println!(
+        "wrote {}",
+        report::write_gate(&chain, &ungated, out_dir)?.display()
+    );
+
+    if cfg.world.seeds > 1 {
+        let runs = with_rest(cfg, (chain, ungated), |c| {
+            let run =
+                |gate| bootloader::run_boot_chain_with(c, root_budget, &c.nesting, gate, |_, _| {});
+            (run(Gate::Bootloader), run(Gate::Open))
+        });
+        let gated: Vec<(u64, bootloader::BootChain)> =
+            runs.iter().map(|(s, (g, _))| (*s, g.clone())).collect();
+        print_ensemble(
+            report::boot_ensemble_summary(&gated),
+            report::write_boot_ensemble(&gated, out_dir),
+        )?;
+        println!();
+        print!("{}", report::gate_ensemble_summary(&runs));
+        println!(
+            "wrote {}",
+            report::write_gate_ensemble(&runs, out_dir)?.display()
+        );
+    }
     Ok(())
 }
 
@@ -295,6 +403,33 @@ fn execute_sweep(
         written.csv.display(),
         written.json.display()
     );
+
+    if cfg.world.seeds > 1 {
+        let runs = with_rest(cfg, sw, |c| sweep::run_sweep(c, steps, min, max, |_, _| {}));
+        print_ensemble(
+            report::sweep_ensemble_summary(&runs),
+            report::write_sweep_ensemble(&runs, out_dir),
+        )?;
+    }
+
+    // Does the answer survive a change of criterion, and of which constants
+    // are swept?
+    println!("\n== sensitivity ==\n");
+    let sens = sweep::run_sensitivity(cfg, steps, min, max);
+    print!("{}", report::sensitivity_summary(&sens));
+    let written = report::write_sensitivity(&sens, out_dir)?;
+    println!(
+        "\nwrote {} and {}",
+        written.csv.display(),
+        written.json.display()
+    );
+    if cfg.world.seeds > 1 {
+        let runs = with_rest(cfg, sens, |c| sweep::run_sensitivity(c, steps, min, max));
+        print_ensemble(
+            report::sensitivity_ensemble_summary(&runs),
+            report::write_sensitivity_ensemble(&runs, out_dir),
+        )?;
+    }
     Ok(())
 }
 
@@ -330,6 +465,18 @@ fn execute_detect(cfg: &Config, out_dir: &Path) -> Result<(), Box<dyn std::error
         written.csv.display(),
         written.json.display()
     );
+
+    if cfg.world.seeds > 1 {
+        let runs = with_rest(cfg, all, |c| {
+            let mut f = detector::investigate_all(c, &who, Gaze::Rendering);
+            f.extend(detector::investigate_all(c, &who, Gaze::Passive));
+            f
+        });
+        print_ensemble(
+            report::detect_ensemble_summary(&runs),
+            report::write_detect_ensemble(&runs, out_dir),
+        )?;
+    }
     Ok(())
 }
 
@@ -350,6 +497,14 @@ fn execute_pipe(cfg: &Config, out_dir: &Path) -> Result<(), Box<dyn std::error::
         written.csv.display(),
         written.json.display()
     );
+
+    if cfg.world.seeds > 1 {
+        let runs = with_rest(cfg, relay, |c| pipe::run_relay(c, &c.horizon));
+        print_ensemble(
+            report::pipe_ensemble_summary(&runs),
+            report::write_pipe_ensemble(&runs, out_dir),
+        )?;
+    }
     Ok(())
 }
 
@@ -367,18 +522,41 @@ fn execute_run(cfg: &Config, out_dir: &Path) -> Result<(), Box<dyn std::error::E
         cfg.observer.coverage(cfg.world.width, cfg.world.height) * 100.0
     );
 
-    let exp = experiment::run_all(cfg, |label| {
-        println!("  running {label} ...");
+    if cfg.world.seeds == 1 {
+        let exp = experiment::run_all(cfg, |label| {
+            println!("  running {label} ...");
+        });
+
+        println!();
+        print!("{}", report::summary(&exp));
+
+        let written = report::write(&exp, out_dir)?;
+        println!(
+            "\nwrote {} and {}",
+            written.csv.display(),
+            written.json.display()
+        );
+        return Ok(());
+    }
+
+    let ens = experiment::run_ensemble(cfg, |seed| {
+        println!("  running every setting at seed {seed} ...");
     });
+    let pinned = &ens.runs[0].1;
 
+    println!("\npinned seed {}:\n", ens.runs[0].0);
+    print!("{}", report::summary(pinned));
     println!();
-    print!("{}", report::summary(&exp));
+    print!("{}", report::ensemble_summary(&ens));
 
-    let written = report::write(&exp, out_dir)?;
+    let written = report::write(pinned, out_dir)?;
+    let ensemble = report::write_ensemble(&ens, out_dir)?;
     println!(
-        "\nwrote {} and {}",
+        "\nwrote {}, {}, {} and {}",
         written.csv.display(),
-        written.json.display()
+        written.json.display(),
+        ensemble.csv.display(),
+        ensemble.json.display()
     );
     Ok(())
 }
@@ -425,6 +603,16 @@ fn execute_nest(
         written.csv.display(),
         written.json.display()
     );
+
+    if cfg.world.seeds > 1 {
+        let runs = with_rest(cfg, chain, |c| {
+            layer::run_chain(c, root_budget, &c.nesting, |_, _| {})
+        });
+        print_ensemble(
+            report::chain_ensemble_summary(&runs),
+            report::write_chain_ensemble(&runs, out_dir),
+        )?;
+    }
     Ok(())
 }
 
@@ -434,6 +622,17 @@ mod tests {
 
     fn argv(s: &str) -> Vec<String> {
         s.split_whitespace().map(String::from).collect()
+    }
+
+    #[test]
+    fn seeds_is_accepted_by_every_command() {
+        for cmd in ["run", "nest", "pipe", "detect", "sweep", "boot"] {
+            let a = parse(argv(&format!("{cmd} --config c.toml --seeds 5")))
+                .unwrap()
+                .unwrap();
+            assert_eq!(a.seeds, Some(5));
+        }
+        assert!(parse(argv("run --config c.toml --seeds many")).is_err());
     }
 
     #[test]

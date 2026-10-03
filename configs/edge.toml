@@ -1,0 +1,45 @@
+# Where a chain dies: the boundary between poverty and sterility.
+#
+# `the-universe edge` sweeps nesting.fraction against nesting.viable_edge over
+# a fixed grid and runs the boot chain at every point, with and without the
+# bootloader gate. viable_work below is held fixed for the whole map; the
+# fraction and edge in [nesting] are ignored, because the map sweeps them.
+
+[world]
+width = 128
+height = 128
+ticks = 200
+seed = 42
+seeds = 10           # an ensemble, smaller than elsewhere: each seed runs 98 chains (~50 s)
+seed_stride = 1000   # seeds 42, 1042, 2042, ...; must exceed 1, the control runs at seed + 1
+init_density = 0.30
+
+[params]
+subdivision = 2
+substeps = 2
+capped_radius = 1
+uncapped_radius = 3
+block_size = 16
+
+[observer]
+x = 16
+y = 16
+width = 96
+height = 96
+
+[horizon]
+x = 32
+y = 32
+width = 48
+height = 48
+# Below this magnitude a parent notices nothing at all.
+threshold = 0.05
+
+[nesting]
+fraction = 0.25      # ignored: swept
+viable_work = 100000 # held fixed across the map: the shipped boot chain's floor
+viable_edge = 4      # ignored: swept
+
+[report]
+macro_grid = 16
+out_dir = "out/edge"

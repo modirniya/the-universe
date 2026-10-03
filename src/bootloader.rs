@@ -26,6 +26,24 @@
 //! space, which would make them unremarkable and disconnect Theory 5 from
 //! Theory 6; or if no rule produces them, which would mean the model cannot
 //! boot anything and the chain in [`crate::layer`] is inert by construction.
+//!
+//! # What the bootloaders do not do
+//!
+//! A child's seed is [`boot_seed`] of what crossed its parent's horizon, and
+//! nothing a bootloader did enters that hash. Bootloaders reach the next layer
+//! only through [`Gate::Bootloader`], which forbids a sterile layer to seed a
+//! child. [`Gate::Open`] removes it, and the ablation in `the-universe boot`
+//! shows the result: the gate can shorten a chain, and never changes a layer.
+//! That is the framework's rule, and the module says so rather than presenting
+//! it as something the dynamics produced.
+//!
+//! # Where a chain dies
+//!
+//! [`map_endings`] runs the chain over a grid of degradation fractions and
+//! size floors, each with and without the gate, and classifies each ending
+//! with [`Ending::of`]. Sterility is credited only where the ungated chain went
+//! deeper, because a chain's own `ended_because` names sterility even when
+//! another limit would have stopped it at the same depth.
 
 use crate::budget::{Budget, Degradation};
 use crate::config::Config;
@@ -286,7 +304,12 @@ pub fn boot_seed(messages: &[crate::pipe::Message]) -> Option<u64> {
     }
     let mut acc = Rng::new(0x1F1E_B00D_10AD_E123);
     for m in messages {
-        acc = Rng::derive(acc.next_u64(), m.tick, m.digest, m.magnitude.to_bits());
+        acc = Rng::derive(
+            acc.next_u64(),
+            m.tick(),
+            m.digest(),
+            m.magnitude().to_bits(),
+        );
     }
     Some(acc.next_u64())
 }
@@ -307,9 +330,33 @@ pub struct BootLayer {
     pub booted_child: bool,
 }
 
+/// Whether a layer needs a bootloader before its horizon may seed a child.
+///
+/// This is an ablation switch. The child's seed is derived from what crossed
+/// the horizon and from nothing else; bootloaders never enter it. So the only
+/// causal link between Theory 5's bootloaders and the next layer is this
+/// gate. [`Gate::Open`] removes it, to show what the chain does without it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Gate {
+    /// A layer with no bootloader seeds nothing. The framework's rule.
+    Bootloader,
+    /// Anything that clears the logging threshold seeds the child.
+    Open,
+}
+
+impl Gate {
+    pub fn label(&self) -> &'static str {
+        match self {
+            Gate::Bootloader => "gated",
+            Gate::Open => "ungated",
+        }
+    }
+}
+
 /// A chain in which every layer is booted by the one above it.
 #[derive(Clone, Debug)]
 pub struct BootChain {
+    pub gate: Gate,
     pub layers: Vec<BootLayer>,
     /// Why it stopped. The interesting part: a chain can run out of money or
     /// run out of life, and which comes first is not decided in advance.
@@ -319,6 +366,29 @@ pub struct BootChain {
 impl BootChain {
     pub fn depth(&self) -> usize {
         self.layers.len()
+    }
+
+    /// Whether two chains built the same layers from the same seeds.
+    ///
+    /// This is the ablation's question: did removing the gate change anything
+    /// a layer received, or only where the chain stopped?
+    pub fn same_layers(&self, other: &BootChain) -> bool {
+        self.layers.len() == other.layers.len()
+            && self
+                .layers
+                .iter()
+                .zip(&other.layers)
+                .all(|(a, b)| a.seed == b.seed && a.spec == b.spec && a.survey == b.survey)
+    }
+
+    /// Whether `other`'s layers start with exactly this chain's layers.
+    pub fn is_prefix_of(&self, other: &BootChain) -> bool {
+        self.layers.len() <= other.layers.len()
+            && self
+                .layers
+                .iter()
+                .zip(&other.layers)
+                .all(|(a, b)| a.seed == b.seed && a.spec == b.spec && a.survey == b.survey)
     }
 }
 
@@ -340,6 +410,17 @@ pub fn run_boot_chain(
     cfg: &Config,
     root_budget: Budget,
     deg: &Degradation,
+    on_layer: impl FnMut(usize, &LayerSpec),
+) -> BootChain {
+    run_boot_chain_with(cfg, root_budget, deg, Gate::Bootloader, on_layer)
+}
+
+/// [`run_boot_chain`] with the bootloader gate chosen explicitly.
+pub fn run_boot_chain_with(
+    cfg: &Config,
+    root_budget: Budget,
+    deg: &Degradation,
+    gate: Gate,
     mut on_layer: impl FnMut(usize, &LayerSpec),
 ) -> BootChain {
     let root = LayerSpec {
@@ -378,7 +459,7 @@ pub fn run_boot_chain(
         let relay = crate::pipe::run_relay(&layer_cfg, &horizon);
         let crossed = relay.received.above(cfg.horizon.threshold);
 
-        let child_seed = if survey.can_boot() {
+        let child_seed = if survey.can_boot() || gate == Gate::Open {
             boot_seed(&crossed)
         } else {
             // A layer with no bootloaders transports nothing, whatever its
@@ -397,7 +478,7 @@ pub fn run_boot_chain(
         });
 
         let Some(next_seed) = child_seed else {
-            break if survey.can_boot() {
+            break if survey.can_boot() || gate == Gate::Open {
                 "nothing cleared the logging threshold, so no seed reached the next layer"
             } else {
                 "the layer produced no bootloader, so there was nothing to boot with"
@@ -415,6 +496,7 @@ pub fn run_boot_chain(
     };
 
     BootChain {
+        gate,
         layers,
         ended_because,
     }
@@ -434,6 +516,129 @@ fn scale_horizon(
         width: ((h.width as f64 * sx).round() as usize).clamp(1, spec.width),
         height: ((h.height as f64 * sy).round() as usize).clamp(1, spec.height),
         threshold: h.threshold,
+        bits: h.bits,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Where a chain dies: the boundary between poverty and sterility
+// ---------------------------------------------------------------------------
+
+/// Why a chain stopped, classified with the gate ablation so that sterility
+/// is only credited where it alone was binding.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Ending {
+    /// The next budget fell below what a universe costs.
+    Budget,
+    /// No world small enough was still viable.
+    Space,
+    /// Nothing cleared the logging threshold.
+    Threshold,
+    /// The last layer was sterile, and without the gate the chain would have
+    /// gone deeper: sterility alone stopped it.
+    Sterile,
+    /// The last layer was sterile, but without the gate the chain stops at the
+    /// same depth anyway. The chain's own label says sterility; it is a tie.
+    Tied,
+}
+
+impl Ending {
+    pub fn glyph(&self) -> char {
+        match self {
+            Ending::Budget => '$',
+            Ending::Space => '#',
+            Ending::Threshold => '~',
+            Ending::Sterile => 'S',
+            Ending::Tied => 's',
+        }
+    }
+
+    /// One word per ending, for CSV and for CI.
+    pub fn code(&self) -> &'static str {
+        match self {
+            Ending::Budget => "budget",
+            Ending::Space => "space",
+            Ending::Threshold => "threshold",
+            Ending::Sterile => "sterile",
+            Ending::Tied => "tied",
+        }
+    }
+
+    pub fn label(&self) -> &'static str {
+        match self {
+            Ending::Budget => "budget",
+            Ending::Space => "space",
+            Ending::Threshold => "threshold",
+            Ending::Sterile => "sterile",
+            Ending::Tied => "sterile, tied with another limit",
+        }
+    }
+
+    /// Classify a chain from its gated and ungated runs.
+    pub fn of(gated: &BootChain, ungated: &BootChain) -> Ending {
+        let sterile_stop = gated.layers.last().is_some_and(|l| !l.survey.can_boot());
+        if sterile_stop {
+            return if ungated.depth() > gated.depth() {
+                Ending::Sterile
+            } else {
+                Ending::Tied
+            };
+        }
+        match gated.ended_because {
+            r if r.starts_with("the budget") => Ending::Budget,
+            r if r.starts_with("nothing cleared") => Ending::Threshold,
+            _ => Ending::Space,
+        }
+    }
+}
+
+/// Degradation fractions the boundary map sweeps, poorest children first.
+pub const EDGE_FRACTIONS: &[f64] = &[0.1, 0.15, 0.2, 0.25, 0.3, 0.4, 0.5];
+/// Smallest viable world edges it sweeps, most permissive first.
+pub const EDGE_FLOORS: &[usize] = &[2, 4, 6, 8, 12, 16, 24];
+
+/// One cell of the map.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct EdgeCell {
+    pub fraction: f64,
+    pub viable_edge: usize,
+    pub gated_depth: usize,
+    pub ungated_depth: usize,
+    pub ending: Ending,
+}
+
+/// How a chain ends across the degradation fraction and the size floor.
+///
+/// `viable_work` is taken from the config and held fixed; the two swept floors
+/// are the ones that trade poverty against sterility. Each cell runs the chain
+/// with and without the bootloader gate, so a cell is called sterile only when
+/// the gate was the sole reason it stopped.
+pub fn map_endings(cfg: &Config, root_budget: Budget) -> Vec<EdgeCell> {
+    let mut out = Vec::with_capacity(EDGE_FRACTIONS.len() * EDGE_FLOORS.len());
+    for &viable_edge in EDGE_FLOORS {
+        for &fraction in EDGE_FRACTIONS {
+            out.push(ending_at(cfg, root_budget, fraction, viable_edge));
+        }
+    }
+    out
+}
+
+/// One cell of the map: the chain at one fraction and one size floor, run
+/// with and without the gate.
+pub fn ending_at(cfg: &Config, root_budget: Budget, fraction: f64, viable_edge: usize) -> EdgeCell {
+    let deg = Degradation {
+        fraction,
+        viable_work: cfg.nesting.viable_work,
+        viable_edge,
+    };
+    let gated = run_boot_chain_with(cfg, root_budget, &deg, Gate::Bootloader, |_, _| {});
+    let ungated = run_boot_chain_with(cfg, root_budget, &deg, Gate::Open, |_, _| {});
+    EdgeCell {
+        fraction,
+        viable_edge,
+        gated_depth: gated.depth(),
+        ungated_depth: ungated.depth(),
+        ending: Ending::of(&gated, &ungated),
     }
 }
 
@@ -454,6 +659,8 @@ mod tests {
                 ticks: 60,
                 seed: 42,
                 init_density: 0.3,
+                seeds: 1,
+                seed_stride: 1000,
             },
             rules: Rules::default(),
             constraints: Constraints::ALL_ON,
@@ -657,17 +864,26 @@ mod tests {
 
     #[test]
     fn the_child_seed_depends_on_what_crossed() {
-        let a = [Message {
-            tick: 1,
-            magnitude: 0.4,
-            digest: 99,
-        }];
-        let b = [Message {
-            tick: 1,
-            magnitude: 0.4,
-            digest: 100,
-        }];
+        let a = [Message::pack(1, 0.4, 99, 128)];
+        let b = [Message::pack(1, 0.4, 100, 128)];
         assert_ne!(boot_seed(&a), boot_seed(&b));
         assert_eq!(boot_seed(&a), boot_seed(&a));
+    }
+
+    #[test]
+    fn every_ending_has_its_own_code_and_glyph() {
+        let all = [
+            Ending::Budget,
+            Ending::Space,
+            Ending::Threshold,
+            Ending::Sterile,
+            Ending::Tied,
+        ];
+        for (i, a) in all.iter().enumerate() {
+            for b in &all[i + 1..] {
+                assert_ne!(a.code(), b.code());
+                assert_ne!(a.glyph(), b.glyph());
+            }
+        }
     }
 }

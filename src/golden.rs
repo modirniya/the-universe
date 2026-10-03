@@ -58,6 +58,8 @@ pub fn golden_config() -> Config {
             ticks: GOLDEN_TICKS,
             seed: GOLDEN_SEED,
             init_density: 0.3,
+            seeds: 1,
+            seed_stride: 1000,
         },
         rules: Rules::default(),
         constraints: Constraints::ALL_ON,

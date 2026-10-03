@@ -4,15 +4,22 @@
 //! back, and what comes out bears no resemblance to what went in — which is the
 //! behaviour of a serializing write, not of a door. The **horizon** is the
 //! write surface: a region of the child universe whose contents are folded into
-//! a single message each tick. The singularity is not a place inside the child
-//! at all; it is outside the child's address space, which is why the child's
-//! physics reports it as a division by zero rather than as a location.
+//! a single message each tick.
 //!
-//! The framework's claim is that content structure is destroyed but *timing and
-//! magnitude* may survive. That is testable, and this module tests it rather
-//! than assuming it: [`Relay::content_avalanche`] measures whether the
-//! arrangement survives, and [`Relay::magnitude_correlation`] measures whether
-//! the amount and the moment do.
+//! # What is designed in, and what is measured
+//!
+//! The framework's claim is that content structure is destroyed but *timing
+//! and magnitude* survive. Most of that is a definition here, not a result. A
+//! [`Message`] has a slot per tick and a field for magnitude, so timing and
+//! magnitude cross because the message was built to carry them; the digest is
+//! a hash, so it avalanches because hashes do. [`Relay::content_avalanche`]
+//! checks that the fold was built correctly, and nothing more.
+//!
+//! What has to be run to be known is *how much* of the child the parent can
+//! still track, and how narrow the channel can get before that is lost. The
+//! channel's width is a dial ([`Horizon::bits`]), and [`Relay::width_sweep`]
+//! reads one child through every width in [`WIDTHS`] at once. That curve is
+//! this module's result.
 //!
 //! # Mutual blindness is enforced by the compiler
 //!
@@ -34,10 +41,11 @@
 //! [`ReadEnd::above`] is the whole of the parent's access to the child, and
 //! [`Relay::visible_fraction`] reports how much of a child's history clears it.
 //!
-//! Falsified within the model if: content structure survives serialization
-//! (the digest would track the arrangement instead of scattering), or timing
-//! and magnitude do *not* survive (the parent's view would be uncorrelated with
-//! the child's behaviour, and the pipe would carry nothing at all).
+//! Falsified within the model if: the parent's view is uncorrelated with the
+//! child's behaviour at every width (the pipe would carry nothing at all), or
+//! the channel needs nearly the full horizon to track the child (it would be a
+//! window rather than a bottleneck). The avalanche failing would falsify the
+//! fold, not the theory.
 
 use crate::config::Config;
 use crate::constraints::{Constraints, Resolved};
@@ -49,19 +57,103 @@ use serde::Deserialize;
 
 /// One serialized write. This is everything that crosses.
 ///
-/// A faithful description of the horizon's contents would need one bit per
-/// cell. This is 128 bits regardless of how large the horizon is, which is
-/// what makes the channel a bottleneck rather than a window.
+/// A message is a payload of at most [`MAX_BITS`] bits and nothing else. The
+/// fields are private and the payload is all that is stored, so a parent
+/// reading one gets back what the channel's width allows and cannot reach the
+/// value the child started from. Timing is not in the payload: one message
+/// crosses per tick, so *when* is the slot it arrives in.
+///
+/// Bits are spent on magnitude first and the digest gets whatever is left:
+///
+/// - **magnitude** takes `min(bits, 64)`. At 53 bits or more it is the exact
+///   `f64` (53 is the mantissa, so nothing is lost); below that it is rounded
+///   onto `2^bits` evenly spaced levels over `[0, 1]`. Uniform levels are the
+///   least tuned encoding available: they favour no particular occupancy.
+/// - **digest** takes `bits - 64` when that is positive, truncated from the
+///   64-bit fold. Below 65 bits nothing about the arrangement crosses at all.
+///
+/// So 128 bits carries everything this pipe has ever carried, and every
+/// narrower width is a strict loss from it.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Message {
-    /// When it crossed. Timing is the cheapest thing to preserve and, per the
-    /// theory, among the likeliest to survive.
-    pub tick: u64,
-    /// How much crossed: occupancy of the horizon, in `[0, 1]`.
-    pub magnitude: f64,
-    /// The arrangement, folded to 64 bits. Position-sensitive, so it depends on
-    /// the pattern — and avalanching, so it cannot be read back as one.
-    pub digest: u64,
+    tick: u64,
+    bits: u32,
+    payload: u128,
+}
+
+/// Widest channel the encoding supports: an exact magnitude and a full digest.
+pub const MAX_BITS: u32 = 128;
+
+/// Mantissa width of an `f64`. At or above this a magnitude crosses exactly.
+const EXACT_BITS: u32 = 53;
+
+impl Message {
+    /// Encode one tick's magnitude and digest into a channel `bits` wide.
+    pub fn pack(tick: u64, magnitude: f64, digest: u64, bits: u32) -> Message {
+        let bits = bits.clamp(1, MAX_BITS);
+        let m_bits = Self::magnitude_bits(bits);
+        let d_bits = Self::digest_bits(bits);
+        let m = if m_bits >= EXACT_BITS {
+            u128::from(magnitude.to_bits())
+        } else {
+            let levels = (1u64 << m_bits) - 1;
+            u128::from((magnitude.clamp(0.0, 1.0) * levels as f64).round() as u64)
+        };
+        let d = if d_bits == 0 {
+            0
+        } else {
+            u128::from(digest >> (64 - d_bits))
+        };
+        Message {
+            tick,
+            bits,
+            payload: m | (d << 64),
+        }
+    }
+
+    fn magnitude_bits(bits: u32) -> u32 {
+        bits.min(64)
+    }
+
+    fn digest_bits(bits: u32) -> u32 {
+        bits.saturating_sub(64)
+    }
+
+    /// When it crossed.
+    pub fn tick(&self) -> u64 {
+        self.tick
+    }
+
+    /// How wide the channel was.
+    pub fn bits(&self) -> u32 {
+        self.bits
+    }
+
+    /// How much crossed, as far as the channel's width preserves it.
+    pub fn magnitude(&self) -> f64 {
+        let m_bits = Self::magnitude_bits(self.bits);
+        let raw = (self.payload & u128::from(u64::MAX)) as u64;
+        if m_bits >= EXACT_BITS {
+            f64::from_bits(raw)
+        } else {
+            raw as f64 / ((1u64 << m_bits) - 1) as f64
+        }
+    }
+
+    /// What survives of the arrangement: the top `bits - 64` bits of the fold,
+    /// or nothing at all on a channel 64 bits wide or narrower.
+    pub fn digest(&self) -> u64 {
+        let d_bits = Self::digest_bits(self.bits);
+        if d_bits == 0 {
+            return 0;
+        }
+        ((self.payload >> 64) as u64) << (64 - d_bits)
+    }
+
+    /// Bits of the digest this message actually carries.
+    pub fn digest_width(&self) -> u32 {
+        Self::digest_bits(self.bits)
+    }
 }
 
 /// The write surface: a region of the child universe, in cells.
@@ -77,10 +169,19 @@ pub struct Horizon {
     /// child's existence at all.
     #[serde(default = "default_threshold")]
     pub threshold: f64,
+    /// Width of the channel, in bits per tick. 128 carries an exact magnitude
+    /// and a full 64-bit digest; anything narrower loses some of one or both.
+    /// See [`Message`] for how the bits are spent.
+    #[serde(default = "default_bits")]
+    pub bits: u32,
 }
 
 fn default_threshold() -> f64 {
     0.05
+}
+
+fn default_bits() -> u32 {
+    MAX_BITS
 }
 
 impl Default for Horizon {
@@ -94,6 +195,7 @@ impl Default for Horizon {
             width: 32,
             height: 32,
             threshold: default_threshold(),
+            bits: default_bits(),
         }
     }
 }
@@ -104,12 +206,14 @@ impl Horizon {
         self.width * self.height
     }
 
-    /// Bits one message actually carries: magnitude and digest.
-    pub const MESSAGE_BITS: usize = 128;
+    /// Bits one message actually carries.
+    pub fn message_bits(&self) -> usize {
+        self.bits as usize
+    }
 
     /// Share of the horizon's information the channel can carry at all.
     pub fn compression_ratio(&self) -> f64 {
-        Self::MESSAGE_BITS as f64 / self.content_bits().max(1) as f64
+        self.message_bits() as f64 / self.content_bits().max(1) as f64
     }
 }
 
@@ -165,7 +269,7 @@ impl ReadEnd {
         self.messages
             .iter()
             .copied()
-            .filter(|m| m.magnitude >= threshold)
+            .filter(|m| m.magnitude() >= threshold)
             .collect()
     }
 }
@@ -176,6 +280,13 @@ impl ReadEnd {
 /// sees their density rather than their detail — the child's own optimizations
 /// apply to what crosses, which is the honest behaviour.
 pub fn serialize(w: &World, h: &Horizon, tick: u64) -> Message {
+    let (magnitude, digest) = fold(w, h, tick);
+    Message::pack(tick, magnitude, digest, h.bits)
+}
+
+/// The horizon's occupancy and its position-sensitive digest, before either is
+/// squeezed into a channel. Only the child side ever holds these.
+fn fold(w: &World, h: &Horizon, tick: u64) -> (f64, u64) {
     let mut live = 0u64;
     let mut total = 0u64;
     // Position-sensitive fold: the digest depends on the arrangement, not just
@@ -193,15 +304,12 @@ pub fn serialize(w: &World, h: &Horizon, tick: u64) -> Message {
         }
     }
 
-    Message {
-        tick,
-        magnitude: if total == 0 {
-            0.0
-        } else {
-            live as f64 / total as f64
-        },
-        digest: acc,
-    }
+    let magnitude = if total == 0 {
+        0.0
+    } else {
+        live as f64 / total as f64
+    };
+    (magnitude, acc)
 }
 
 /// What one child's transmission looked like from both sides.
@@ -217,6 +325,10 @@ pub struct Relay {
     /// Mean fraction of digest bits that flip when a single cell of the
     /// horizon is changed.
     pub content_avalanche: f64,
+    /// The same child, read through channels of other widths at once. Each is
+    /// its own pipe with its own sealed read end; the child writes to all of
+    /// them and can tell none of them apart.
+    pub by_width: Vec<ReadEnd>,
 }
 
 impl Relay {
@@ -225,7 +337,7 @@ impl Relay {
     /// The parent sees a keyhole. This asks how much of the whole universe's
     /// behaviour that keyhole tracks.
     pub fn magnitude_correlation(&self) -> f64 {
-        let seen: Vec<f64> = self.received.all().iter().map(|m| m.magnitude).collect();
+        let seen: Vec<f64> = self.received.all().iter().map(|m| m.magnitude()).collect();
         correlation(&seen, &self.child_truth)
     }
 
@@ -247,10 +359,10 @@ impl Relay {
     /// strongest row in the table while being pure noise.
     pub fn correlation_above(&self, threshold: f64) -> f64 {
         let kept = self.received.above(threshold);
-        let seen: Vec<f64> = kept.iter().map(|m| m.magnitude).collect();
+        let seen: Vec<f64> = kept.iter().map(|m| m.magnitude()).collect();
         let truth: Vec<f64> = kept
             .iter()
-            .filter_map(|m| self.child_truth.get(m.tick as usize).copied())
+            .filter_map(|m| self.child_truth.get(m.tick() as usize).copied())
             .collect();
         if seen.len().min(truth.len()) < MIN_CORRELATION_SAMPLES {
             return f64::NAN;
@@ -291,12 +403,18 @@ pub fn correlation(a: &[f64], b: &[f64]) -> f64 {
 
 /// Mean fraction of digest bits that flip when one cell of the horizon changes.
 ///
-/// Near 0.5 means the fold behaves like a hash: a one-cell difference produces
-/// an unrelated digest, so no amount of comparing digests recovers the
-/// arrangement. Near 0 would mean the structure survived, and Theory 3 would be
-/// wrong in the direction that matters.
+/// This is a check on the fold, not a finding about pipes. A digest built by
+/// chaining a hash over every cell is expected to avalanche, and near 0.5 says
+/// it does: a one-cell difference produces an unrelated digest. Near 0 would
+/// mean the fold was badly built, which would undermine the claim that content
+/// does not cross in a readable form. On a channel too narrow to carry any
+/// digest there is nothing to measure, and the answer is `NaN`.
 pub fn avalanche(w: &World, h: &Horizon, tick: u64, samples: usize) -> f64 {
     let base = serialize(w, h, tick);
+    let width = f64::from(base.digest_width());
+    if width == 0.0 {
+        return f64::NAN;
+    }
     let mut probe = w.clone();
     let cells = h.width * h.height;
     if cells == 0 || samples == 0 {
@@ -319,7 +437,7 @@ pub fn avalanche(w: &World, h: &Horizon, tick: u64, samples: usize) -> f64 {
         probe.cells[idx] ^= 1;
         let flipped = serialize(&probe, h, tick);
         probe.cells[idx] ^= 1;
-        total += (base.digest ^ flipped.digest).count_ones() as f64 / 64.0;
+        total += (base.digest() ^ flipped.digest()).count_ones() as f64 / width;
         taken += 1;
     }
 
@@ -383,6 +501,7 @@ pub fn run_relay(cfg: &Config, horizon: &Horizon) -> Relay {
 
     let mut world = World::seed(geom, cfg.world.seed, cfg.world.init_density);
     let mut write = WriteEnd::new();
+    let mut widths: Vec<WriteEnd> = WIDTHS.iter().map(|_| WriteEnd::new()).collect();
     let mut child_truth = Vec::with_capacity(cfg.world.ticks as usize);
 
     let mut avalanche_total = 0.0;
@@ -395,7 +514,11 @@ pub fn run_relay(cfg: &Config, horizon: &Horizon) -> Relay {
         let (observed, _) = observe(&world, &cfg.observer, t, cfg.world.seed, res.lazy);
         let (advanced, _) = tick(&observed, &cfg.rules, &res);
 
-        write.write(serialize(&advanced, horizon, t));
+        let (magnitude, digest) = fold(&advanced, horizon, t);
+        write.write(Message::pack(t, magnitude, digest, horizon.bits));
+        for (end, &bits) in widths.iter_mut().zip(WIDTHS) {
+            end.write(Message::pack(t, magnitude, digest, bits));
+        }
         child_truth.push(advanced.live_fraction());
 
         if t % stride == 0 {
@@ -415,6 +538,59 @@ pub fn run_relay(cfg: &Config, horizon: &Horizon) -> Relay {
         } else {
             avalanche_total / avalanche_samples as f64
         },
+        by_width: widths.into_iter().map(WriteEnd::seal).collect(),
+    }
+}
+
+/// Channel widths the relay always measures, narrowest first.
+pub const WIDTHS: &[u32] = &[1, 2, 3, 4, 6, 8, 16, 32, 64, 128];
+
+/// One row of the channel-width sweep.
+#[derive(Clone, Copy, Debug)]
+pub struct WidthRow {
+    pub bits: u32,
+    /// Distinct magnitudes the parent actually received at this width.
+    pub levels_seen: usize,
+    /// Correlation between what crossed and what the child was doing, or
+    /// `NaN` when everything that crossed was the same value.
+    pub correlation: f64,
+}
+
+impl Relay {
+    /// How much of the child's behaviour survives as the channel narrows.
+    ///
+    /// This is the measurable part of Theory 3. That *some* magnitude crosses
+    /// is designed into [`Message`]; how much of the child it still tracks at
+    /// a given width is not, and has to be run to be known.
+    pub fn width_sweep(&self) -> Vec<WidthRow> {
+        WIDTHS
+            .iter()
+            .zip(&self.by_width)
+            .map(|(&bits, end)| {
+                let seen: Vec<f64> = end.all().iter().map(|m| m.magnitude()).collect();
+                let mut distinct: Vec<u64> = seen.iter().map(|v| v.to_bits()).collect();
+                distinct.sort_unstable();
+                distinct.dedup();
+                WidthRow {
+                    bits,
+                    levels_seen: distinct.len(),
+                    correlation: correlation(&seen, &self.child_truth),
+                }
+            })
+            .collect()
+    }
+
+    /// Narrowest width at which the parent's view tracks the child at least
+    /// as well as `share` of what the widest channel manages.
+    pub fn width_for(&self, share: f64) -> Option<u32> {
+        let rows = self.width_sweep();
+        let best = rows.last()?.correlation;
+        if !best.is_finite() {
+            return None;
+        }
+        rows.iter()
+            .find(|r| r.correlation.is_finite() && r.correlation >= share * best)
+            .map(|r| r.bits)
     }
 }
 
@@ -434,6 +610,7 @@ mod tests {
             width: 16,
             height: 16,
             threshold: default_threshold(),
+            bits: default_bits(),
         }
     }
 
@@ -468,6 +645,7 @@ mod tests {
             width: 8,
             height: 8,
             threshold: default_threshold(),
+            bits: default_bits(),
         };
         for y in 0..8 {
             for x in 0..8 {
@@ -475,7 +653,7 @@ mod tests {
                 w.cells[i] = 1;
             }
         }
-        assert!((serialize(&w, &h, 0).magnitude - 1.0).abs() < 1e-12);
+        assert!((serialize(&w, &h, 0).magnitude() - 1.0).abs() < 1e-12);
 
         for y in 0..8 {
             for x in 0..8 {
@@ -483,7 +661,7 @@ mod tests {
                 w.cells[i] = 0;
             }
         }
-        assert_eq!(serialize(&w, &h, 0).magnitude, 0.0);
+        assert_eq!(serialize(&w, &h, 0).magnitude(), 0.0);
     }
 
     #[test]
@@ -497,6 +675,7 @@ mod tests {
             width: 8,
             height: 8,
             threshold: default_threshold(),
+            bits: default_bits(),
         };
         for y in 0..8 {
             for x in 0..8 {
@@ -512,8 +691,11 @@ mod tests {
             }
         }
         let (ma, mb) = (serialize(&a, &h, 0), serialize(&b, &h, 0));
-        assert!((ma.magnitude - mb.magnitude).abs() < 1e-12, "same amount");
-        assert_ne!(ma.digest, mb.digest, "different arrangement");
+        assert!(
+            (ma.magnitude() - mb.magnitude()).abs() < 1e-12,
+            "same amount"
+        );
+        assert_ne!(ma.digest(), mb.digest(), "different arrangement");
     }
 
     #[test]
@@ -532,7 +714,7 @@ mod tests {
     fn timing_is_carried_exactly() {
         let w = world();
         for tick in [0u64, 1, 99, 4096] {
-            assert_eq!(serialize(&w, &horizon(), tick).tick, tick);
+            assert_eq!(serialize(&w, &horizon(), tick).tick(), tick);
         }
     }
 
@@ -543,11 +725,7 @@ mod tests {
         // actually holds the line, since adding a read method here would be
         // the only way to break it.
         let mut w = WriteEnd::new();
-        w.write(Message {
-            tick: 0,
-            magnitude: 0.5,
-            digest: 1,
-        });
+        w.write(Message::pack(0, 0.5, 1, MAX_BITS));
         let r = w.seal();
         assert_eq!(r.all().len(), 1);
     }
@@ -556,11 +734,7 @@ mod tests {
     fn the_logging_threshold_hides_small_events() {
         let mut w = WriteEnd::new();
         for (tick, magnitude) in [(0, 0.01), (1, 0.4), (2, 0.02), (3, 0.9)] {
-            w.write(Message {
-                tick,
-                magnitude,
-                digest: tick,
-            });
+            w.write(Message::pack(tick, magnitude, tick, MAX_BITS));
         }
         let r = w.seal();
         assert_eq!(r.all().len(), 4);
@@ -583,17 +757,14 @@ mod tests {
             (5, 0.15),
         ];
         for (tick, magnitude) in history {
-            w.write(Message {
-                tick,
-                magnitude,
-                digest: tick,
-            });
+            w.write(Message::pack(tick, magnitude, tick, MAX_BITS));
         }
         let relay = Relay {
             horizon: horizon(),
             received: w.seal(),
             child_truth: vec![0.5, 0.4, 0.6, 0.3, 0.35, 0.45],
             content_avalanche: 0.5,
+            by_width: Vec::new(),
         };
 
         assert_eq!(relay.registered(0.5), 2);
@@ -606,6 +777,55 @@ mod tests {
             !relay.correlation_above(0.0).is_nan(),
             "at or above the minimum, a correlation is reportable"
         );
+    }
+
+    #[test]
+    fn the_full_width_carries_magnitude_and_digest_exactly() {
+        let m = Message::pack(7, 0.123_456_789, 0xDEAD_BEEF_0123_4567, MAX_BITS);
+        assert_eq!(m.tick(), 7);
+        assert_eq!(m.magnitude(), 0.123_456_789);
+        assert_eq!(m.digest(), 0xDEAD_BEEF_0123_4567);
+        assert_eq!(m.digest_width(), 64);
+    }
+
+    #[test]
+    fn magnitude_is_paid_for_first_and_the_digest_gets_the_rest() {
+        let d = 0xFFFF_0000_FFFF_0000u64;
+        // 96 bits: an exact magnitude and the top 32 bits of the digest.
+        let m = Message::pack(0, 0.3, d, 96);
+        assert_eq!(m.magnitude(), 0.3);
+        assert_eq!(m.digest(), 0xFFFF_0000_0000_0000);
+        // 64 bits and below: no arrangement crosses at all.
+        let m = Message::pack(0, 0.3, d, 64);
+        assert_eq!(m.magnitude(), 0.3);
+        assert_eq!((m.digest(), m.digest_width()), (0, 0));
+    }
+
+    #[test]
+    fn a_narrow_channel_rounds_magnitude_onto_even_levels() {
+        // 8 bits: 255 steps over [0, 1], so the error is at most half a step.
+        for v in [0.0, 0.01, 0.2, 0.5, 0.999, 1.0] {
+            let m = Message::pack(0, v, 0, 8);
+            assert!((m.magnitude() - v).abs() <= 0.5 / 255.0 + 1e-12, "{v}");
+        }
+        // 1 bit: one threshold, at one half.
+        assert_eq!(Message::pack(0, 0.49, 0, 1).magnitude(), 0.0);
+        assert_eq!(Message::pack(0, 0.51, 0, 1).magnitude(), 1.0);
+    }
+
+    #[test]
+    fn widths_outside_the_encoding_are_clamped() {
+        assert_eq!(Message::pack(0, 0.5, 0, 0).bits(), 1);
+        assert_eq!(Message::pack(0, 0.5, 0, 500).bits(), MAX_BITS);
+    }
+
+    #[test]
+    fn there_is_no_avalanche_to_measure_without_a_digest() {
+        let h = Horizon {
+            bits: 64,
+            ..horizon()
+        };
+        assert!(avalanche(&world(), &h, 3, 64).is_nan());
     }
 
     #[test]
@@ -639,8 +859,9 @@ mod tests {
             width: 8,
             height: 8,
             threshold: default_threshold(),
+            bits: default_bits(),
         };
         let m = serialize(&w, &seam, 0);
-        assert!((0.0..=1.0).contains(&m.magnitude));
+        assert!((0.0..=1.0).contains(&m.magnitude()));
     }
 }

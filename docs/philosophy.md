@@ -41,7 +41,9 @@ observer could trivially tell. See "Findings" in the README for what actually
 happened, including the one limit that turned out not to be free.
 
 **Can an inhabitant tell?** `detector` asks this, and the answer is partial.
-Pixelation is invisible because the cell is the ruler. The speed of influence is
+Pixelation's scale is invisible because the cell is the ruler, but its shape is
+not: influence reaches √2 further along a diagonal than along an axis, so an
+inhabitant can learn it lives on a lattice without learning how fine it is. The speed of influence is
 measurable but arrives as a product that cannot be factored, so an inhabitant
 can know it is constrained without learning how. Lazy rendering is concealed by
 the act of measuring it, since looking is what forces a region into full
@@ -83,13 +85,16 @@ the spatial floor before it ran out of money.
 
 A **pipe** is a one-way channel between layers.
 
-The framework's candidate for a real one is the black hole. What goes in does
+The framework's candidate for a real one is the black hole: what goes in does
 not come back, and what comes out bears no resemblance to what went in. That is
-exactly the behaviour of a serializing write: structure is destroyed,
-compressed, scrambled. The **horizon** is the write surface. The singularity is
-not a place inside the child universe at all — it is outside the child's
-address space, which is why the child's physics reports it as a division by
-zero rather than as a location.
+the behaviour of a serializing write, in which structure is destroyed,
+compressed, scrambled. The **horizon** is the write surface.
+
+That is an analogy, and nothing in this repository tests it. The model has no
+gravity, no horizon in the physical sense, and no singularity. An earlier
+version of this section said the singularity lies outside the child's address
+space, which is why physics reports it as a division by zero; that is a claim
+about our universe, the code cannot reach it, and it has been withdrawn.
 
 What might survive serialization is not content but *timing and magnitude*: how
 much went in, and when. A parent reading the far end of the pipe would receive
@@ -100,12 +105,17 @@ into one 128-bit message per tick, whatever its area. Serialization is
 position-sensitive, so the digest depends on the arrangement — and avalanching,
 so it cannot be read back as one.
 
-**What would falsify it within the model:** content structure surviving the
-crossing (the digest tracking the arrangement instead of scattering), or timing
-and magnitude *not* surviving (a parent's view uncorrelated with the child's
-behaviour, meaning the pipe carries nothing at all). Neither happened: a
-one-cell change flips half the digest, while what crossed still tracks the child
-at 0.79 through a channel carrying 5.6% of the information.
+**What is designed in.** The message has a field for magnitude and a digest
+that is a hash, so "timing and magnitude survive, arrangement does not" is how
+the pipe was built rather than something the run discovered. The avalanche
+test checks the hash, nothing more.
+
+**What would falsify it within the model:** a parent's view uncorrelated with
+the child's behaviour at every channel width, meaning the pipe carries nothing
+at all; or a channel that needs most of the horizon's bits to track the child,
+meaning it is a window rather than a bottleneck. Neither happened. What crossed
+tracks the child at 0.82 on average across twenty seeds, and two or three bits
+a tick usually keep 90% of that.
 
 ---
 
@@ -168,13 +178,22 @@ parent, through a channel neither end can see through.
 
 **What would falsify it within the model:** bootloaders appearing everywhere,
 which would make them unremarkable and disconnect this from Theory 6; or nowhere,
-which would mean the chain is inert by construction. Neither happened. What did
-happen is a second limit on depth: a chain can end because a layer is too small
-to grow anything that travels, with budget still in hand. Life gives out before
-money does, given a permissive enough floor.
+which would mean the chain is inert by construction. Neither happened.
+
+**What the model does not show.** The child's seed is derived from what crossed
+the horizon, and bootloaders never enter it. They reach the next layer only
+through a gate the framework imposes: a layer with no bootloader may not seed a
+child. Removing the gate changes nothing under the shipped floors, and under
+permissive ones it only lets chains run further; in no case does it change what
+a child is. So in this model life decides *whether* the next layer exists, by
+rule, and never *what* it is. A version of Theory 5 with teeth would need the
+child to depend on what the bootloaders did, and that is the unscheduled
+research track, not this repository.
 
 **What it is not.** Nothing here builds a computer. The model shows the
-precondition is available, not that the achievement follows.
+precondition is available, not that the achievement follows. "The cosmic role
+of emergent agents is to boot the next layer" is an interpretation of the
+framework, not an output of any experiment here.
 
 ---
 
@@ -199,9 +218,12 @@ spatially structured.
 
 **What would falsify it within the model:** complexity turning out to be common.
 The fine-tuning claim needs the productive band to be narrow, and a sweep
-finding most laws productive would refute it. The measured answer is 19% of the
-distinct laws reachable — a minority, but not the sliver the argument usually
-assumes. Two cautions travel with that number: the bar is calibrated from Conway
+finding most laws productive would refute it. Productive laws are a minority
+under every criterion tried, in every seed, so the claim survives in this model.
+How small a minority does not survive scrutiny as a single number. Under the
+Conway-calibrated bar it is 9% on average across twenty seeds; under two
+criteria that never look at Conway, it is 28% to 33%. Seed 42 alone gave the
+19% that was first reported as the answer. Two cautions travel with that number: the bar is calibrated from Conway
 and so measures resemblance rather than worth, and the productive fraction must
 be counted over *distinct laws* rather than grid area, since a neighbourhood of
 eight cells only admits densities k/8 and 441 settings collapse onto 42 laws.
@@ -209,6 +231,12 @@ eight cells only admits densities k/8 and 441 settings collapse onto 42 laws.
 ---
 
 ## The parts that cannot be coded
+
+Sections 1 to 6 are tested, but only as models: each has a module that
+implements it and a command whose output can contradict it, and every such test
+is a test of the toy, not of the world. Sections 7 to 10 are not tested at all.
+Nothing in the repository bears on them, and no run of it is evidence for or
+against them. They are here to say why the experiments were worth building.
 
 Everything above can be modelled. What follows cannot, and lives here so that
 it stays out of the code.

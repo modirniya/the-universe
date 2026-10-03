@@ -1,4 +1,4 @@
-# Theory 5: bootloader life, and the loop the whole framework describes.
+# Theory 5 with permissive floors: a chain that can die of sterility.
 #
 # Every layer is seeded by what crossed its parent's horizon. Emergent
 # structures drive the activity, the activity is what crosses, and what crosses
@@ -7,6 +7,12 @@
 #
 # The chain can end for want of budget or for want of anything alive enough to
 # boot with. Which comes first is not decided here.
+#
+# This is configs/boot.toml with the floors in [nesting] lowered, so worlds as
+# small as 4 cells a side are viable. Under these floors the chain runs until a
+# layer is too small to grow anything that travels: it dies of sterility, with
+# budget still in hand. It is also where the bootloader gate is tested, since
+# the shipped floors stop every chain before the gate is ever reached.
 
 [world]
 width = 128
@@ -40,9 +46,9 @@ threshold = 0.05
 
 [nesting]
 fraction = 0.25
-viable_work = 100000
-viable_edge = 16
+viable_work = 2000   # permissive: see the header
+viable_edge = 4
 
 [report]
 macro_grid = 16
-out_dir = "out/boot"
+out_dir = "out/boot-permissive"

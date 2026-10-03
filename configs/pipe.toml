@@ -9,6 +9,8 @@ width = 128
 height = 128
 ticks = 300
 seed = 42
+seeds = 20           # an ensemble: seed 42 is the pinned example, 19 more make it a finding
+seed_stride = 1000   # seeds 42, 1042, 2042, ...; must exceed 1, the control runs at seed + 1
 init_density = 0.30
 
 [params]
@@ -32,6 +34,8 @@ x = 48
 y = 48
 width = 48
 height = 48
+bits = 128   # channel width per tick: an exact magnitude plus a 64-bit digest.
+             # The relay also reads the same child at 1..64 bits regardless.
 
 [report]
 macro_grid = 16

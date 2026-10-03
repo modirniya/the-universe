@@ -63,6 +63,10 @@ jobs:
       # command and checks the reproducible part of what the README says about
       # it. Wall time is deliberately not asserted on -- it is a measurement,
       # not a counter, and a shared CI runner is the worst place to measure it.
+      #
+      # Every documented config runs a 20-seed ensemble. The pinned seed's
+      # artifacts are checked as before; the ensemble checks below assert on
+      # shares of seeds, because one seed is an example and not a finding.
       - name: Run the documented experiment
         run: cargo run --release -- run --config configs/default.toml
 
@@ -81,6 +85,12 @@ jobs:
       - name: Run the documented boot chain
         run: cargo run --release -- boot --config configs/boot.toml
 
+      - name: Run the boot chain under permissive floors
+        run: cargo run --release -- boot --config configs/boot-permissive.toml
+
+      - name: Run the map of where chains die
+        run: cargo run --release -- edge --config configs/edge.toml
+
       - name: Artifacts were written
         run: |
           test -s out/runs.csv && test -s out/report.json
@@ -88,7 +98,12 @@ jobs:
           test -s out/pipe/pipe.csv && test -s out/pipe/pipe.json
           test -s out/detect/detection.csv && test -s out/detect/detection.json
           test -s out/sweep/sweep.csv && test -s out/sweep/sweep.json
+          test -s out/sweep/sensitivity.json && test -s out/sweep/sensitivity_ensemble.csv
           test -s out/boot/boot.csv && test -s out/boot/boot.json
+          test -s out/boot/gate.csv && test -s out/boot-permissive/gate.csv
+          test -s out/edge/edge.csv
+          test -s out/ensemble.csv && test -s out/ensemble.json
+          for d in nesting pipe detect sweep boot; do test -s out/$d/ensemble.csv; done
 
       - name: Constraints reduce work, and the control is non-degenerate
         run: |
@@ -185,6 +200,17 @@ jobs:
           if d["compression_ratio"] >= 0.10:
               fail.append(f"channel carries {d['compression_ratio']:.3f}, too wide to be a bottleneck")
 
+          # The measured half: how narrow the channel can get. The widest row
+          # is the pipe as it always was, and a few bits must keep 90% of it.
+          widths = d["widths"]
+          widest = widths[-1]
+          if widest["bits"] != 128 or abs(widest["correlation"] - corr) > 1e-6:
+              fail.append("the 128-bit row is not the pipe's own correlation")
+          enough = [w["bits"] for w in widths
+                    if w["correlation"] is not None and w["correlation"] >= 0.9 * corr]
+          if not enough or min(enough) > 8:
+              fail.append(f"no channel of 8 bits or fewer kept 90%: {enough}")
+
           # Raising the threshold must never reveal more.
           vis = [float(r["visible_fraction"]) for r in rows]
           for a, b in zip(vis, vis[1:]):
@@ -214,7 +240,7 @@ jobs:
       - name: Detection findings hold
         run: |
           python3 - <<'PY'
-          import csv, sys
+          import csv, json, sys
 
           rows = list(csv.DictReader(open("out/detect/detection.csv")))
           honest = [r for r in rows if r["gaze"] == "looking renders"]
@@ -228,9 +254,16 @@ jobs:
                   return None
               return hit[0]["detectable"] == "true"
 
-          # The cell is the ruler.
+          # The cell is the ruler: scale leaves no fingerprint...
           if verdict(honest, "discrete_space"):
               fail.append("discrete_space should leave no fingerprint")
+          # ...but shape does: a square lattice is not isotropic, and a finer
+          # square lattice has the same shape.
+          iso = json.load(open("out/detect/detection.json"))["isotropy"]
+          if not iso["found"] or abs(iso["lattice"] - 2 ** 0.5) > 1e-6:
+              fail.append(f"the lattice's shape should read sqrt(2): {iso}")
+          if iso["separates_scale"]:
+              fail.append("the lattice's scale should stay hidden")
           # The speed of influence is measurable.
           if not verdict(honest, "speed_cap"):
               fail.append("speed_cap should be findable from inside")
@@ -277,6 +310,21 @@ jobs:
               if o["complex"] and o["activity"] > d["bar"]["max_activity"]:
                   fail.append(f"a chaotic setting was admitted: activity {o['activity']}")
                   break
+
+          # Sensitivity. The Conway criterion at Conway's widths is the sweep
+          # above, exactly; the answer under every criterion stays a minority.
+          sens = json.load(open("out/sweep/sensitivity.json"))
+          crit = {c["criterion"]: c for c in sens["criteria"]}
+          if abs(crit["resembles conway"]["at_conway_widths"] - rf) > 1e-6:
+              fail.append("the sensitivity analysis does not reproduce the sweep")
+          for name in ("resembles conway", "compressibility"):
+              if not crit[name]["conway_admitted"]:
+                  fail.append(f"Conway failed the {name} criterion")
+          for name, c in crit.items():
+              if not 0.0 < c["all_constants"] < 0.5:
+                  fail.append(f"{name}: productive share {c['all_constants']:.3f} outside (0, 0.5)")
+          print(f"sensitivity: {sens['range'][0]*100:.1f}% to {sens['range'][1]*100:.1f}% "
+                f"over {sens['laws']} laws")
 
           print(f"{d['distinct_complex']} of {d['distinct_rules']} distinct laws productive "
                 f"({rf*100:.1f}%), over {len(d['grid'])} settings")
@@ -329,6 +377,185 @@ jobs:
               print("\nFAILED:", *fail, sep="\n  ")
               sys.exit(1)
           print("\nbootloader claims hold")
+          PY
+
+      - name: Findings hold across seeds, not just at seed 42
+        run: |
+          python3 - <<'PY'
+          import csv, json, sys
+          from collections import defaultdict
+
+          fail = []
+
+          # Theory 1. Discrete time is below its own seed's chaos floor in
+          # (nearly) every seed; the other single limits are above it in
+          # (nearly) every seed.
+          d = json.load(open("out/ensemble.json"))
+          n = len(d["seeds"])
+          if n < 20:
+              fail.append(f"run: expected a 20-seed ensemble, got {n}")
+          lim = {l["label"]: l for l in d["limits"]}
+          if lim["time"]["below_floor"] < 0.9 * n:
+              fail.append(f"time below the floor in only {lim['time']['below_floor']}/{n} seeds")
+          for label in ("space", "speed", "lazy"):
+              if lim[label]["unnoticeable"] > 0.1 * n:
+                  fail.append(f"{label} hid under the floor in {lim[label]['unnoticeable']}/{n} seeds")
+          if lim["all_on"]["work_ratio"]["max"] > 0.05:
+              fail.append("all_on lost the ~190x saving in some seed")
+          print(f"run: time below floor {lim['time']['below_floor']}/{n}, "
+                f"vs floor {lim['time']['vs_floor']['mean']:.2f}")
+
+          # Theory 2. The deepest layer is calmer than the root in every seed.
+          chains = defaultdict(dict)
+          for r in csv.DictReader(open("out/nesting/ensemble.csv")):
+              chains[r["seed"]][int(r["depth"])] = float(r["churn"])
+          calmer = sum(1 for c in chains.values() if c[max(c)] < c[min(c)])
+          if calmer < len(chains):
+              fail.append(f"nest: deepest layer calmer than root in only {calmer}/{len(chains)}")
+          print(f"nest: deepest calmer than root in {calmer}/{len(chains)}")
+
+          # Theory 3. The hash avalanches and the magnitude tracks the child
+          # in every seed.
+          pipes = list(csv.DictReader(open("out/pipe/ensemble.csv")))
+          lo = min(float(r["magnitude_correlation"]) for r in pipes)
+          av = [float(r["content_avalanche"]) for r in pipes]
+          if lo < 0.5:
+              fail.append(f"pipe: magnitude correlation fell to {lo:.3f} in some seed")
+          if not all(0.45 <= a <= 0.55 for a in av):
+              fail.append("pipe: avalanche left [0.45, 0.55] in some seed")
+          w90 = [float(r["width_for_90"]) for r in pipes]
+          if not all(w <= 8 for w in w90):
+              fail.append(f"pipe: some seed needed more than 8 bits for 90%: {max(w90)}")
+          print(f"pipe: worst correlation {lo:.3f}, widest 90% width {max(w90):.0f} bits, "
+                f"over {len(pipes)} seeds")
+
+          # Detection. Per gaze and limit, the share of seeds where it was found.
+          found = defaultdict(lambda: [0, 0])
+          for r in csv.DictReader(open("out/detect/ensemble.csv")):
+              k = (r["gaze"], r["limit"])
+              found[k][0] += r["detectable"] == "true"
+              found[k][1] += 1
+          def share(gaze, limit):
+              f, t = found[(gaze, limit)]
+              return f / t if t else float("nan")
+          if share("looking renders", "discrete_space") > 0:
+              fail.append("detect: discrete_space was found in some seed")
+          if share("looking renders", "speed_cap") < 1:
+              fail.append("detect: speed_cap was missed in some seed")
+          if share("looking renders", "lazy_rendering") > 0:
+              fail.append("detect: looking failed to conceal lazy rendering in some seed")
+          if share("reads without rendering", "lazy_rendering") < 0.5:
+              fail.append("detect: a passive reader found lazy rendering in under half the seeds")
+          shapes = [float(r["anisotropy_with"]) for r in csv.DictReader(open("out/detect/ensemble.csv"))
+                    if r["gaze"] == "looking renders" and r["limit"] == "discrete_space"]
+          if not all(abs(a - 2 ** 0.5) < 1e-6 for a in shapes):
+              fail.append("detect: the lattice's shape did not read sqrt(2) in every seed")
+          print(f"detect: passive reader finds lazy rendering in "
+                f"{share('reads without rendering', 'lazy_rendering'):.0%} of seeds")
+
+          # Theory 6. Conway passes its own bar everywhere; the productive
+          # share stays a minority in every seed.
+          sweeps = list(csv.DictReader(open("out/sweep/ensemble.csv")))
+          if not all(r["reference_admitted"] == "true" for r in sweeps):
+              fail.append("sweep: Conway failed its own bar in some seed")
+          hi = max(float(r["productive_rule_fraction"]) for r in sweeps)
+          if not 0.0 < hi < 0.5:
+              fail.append(f"sweep: productive share reached {hi:.3f}")
+          print(f"sweep: highest productive share {hi:.3f} over {len(sweeps)} seeds")
+
+          # Sensitivity across seeds: a minority under every criterion, and
+          # Conway passes the compressibility criterion it never saw.
+          sens = list(csv.DictReader(open("out/sweep/sensitivity_ensemble.csv")))
+          top = max(float(r["all_constants"]) for r in sens)
+          if top >= 0.5:
+              fail.append(f"sensitivity: some criterion reached {top:.3f}")
+          if not all(r["conway_admitted"] == "true" for r in sens
+                     if r["criterion"] == "compressibility"):
+              fail.append("sensitivity: Conway failed compressibility in some seed")
+          print(f"sensitivity: highest share under any criterion {top:.3f}")
+
+          # Theory 5. Bootloaders never rise down a chain, in any seed.
+          boots = defaultdict(dict)
+          for r in csv.DictReader(open("out/boot/ensemble.csv")):
+              boots[r["seed"]][int(r["depth"])] = int(r["bootloaders"])
+          for seed, b in boots.items():
+              depths = sorted(b)
+              if len(depths) < 2:
+                  fail.append(f"boot: seed {seed} reached only depth {len(depths)}")
+              if any(b[y] > b[x] for x, y in zip(depths, depths[1:])):
+                  fail.append(f"boot: bootloaders rose down the chain at seed {seed}")
+          # The gate ablation. Bootloaders never change what a child receives,
+          # under either floor; under the shipped floors the gate never fires.
+          for path, may_fire in (("out/boot/gate.csv", False),
+                                 ("out/boot-permissive/gate.csv", True)):
+              rows = list(csv.DictReader(open(path)))
+              if not all(r["prefix"] == "true" for r in rows):
+                  fail.append(f"{path}: a gated chain differed from the ungated one in a shared layer")
+              fired = sum(r["gate_fired"] == "true" for r in rows)
+              if not may_fire and fired:
+                  fail.append(f"{path}: the gate fired in {fired} seeds under the shipped floors")
+              if may_fire and not any(int(r["ungated_depth"]) > int(r["gated_depth"]) for r in rows):
+                  fail.append(f"{path}: the gate never stopped a chain under permissive floors")
+              print(f"boot: {path} gate fired in {fired}/{len(rows)}")
+          print(f"boot: {len(boots)} chains checked")
+
+          if fail:
+              print("\nFAILED:", *fail, sep="\n  ")
+              sys.exit(1)
+          print("\nthe ensemble findings hold")
+          PY
+
+      - name: The map of where chains die is pinned at seed 42
+        run: |
+          python3 - <<'PY'
+          import csv, sys
+
+          # Rows are size floors, columns are degradation fractions, in the
+          # order bootloader::EDGE_FLOORS and EDGE_FRACTIONS list them.
+          # $ budget, # space, ~ threshold, S sterility alone, s sterile but tied.
+          pinned = {
+              2:  "$$s$$sS",
+              4:  "$$s$$sS",
+              6:  "$$s$$sS",
+              8:  "$$s$$sS",
+              12: "#$#$##s",
+              16: "#######",
+              24: "#######",
+          }
+          fractions = ["0.10", "0.15", "0.20", "0.25", "0.30", "0.40", "0.50"]
+          glyph = {"budget": "$", "space": "#", "threshold": "~", "sterile": "S", "tied": "s"}
+
+          rows = list(csv.DictReader(open("out/edge/edge.csv")))
+          seed42 = {(int(r["viable_edge"]), r["fraction"]): glyph[r["ending"]]
+                    for r in rows if r["seed"] == "42"}
+          fail = []
+          for edge, want in pinned.items():
+              got = "".join(seed42.get((edge, f), "?") for f in fractions)
+              print(f"  edge {edge:>2}  {got}")
+              if got != want:
+                  fail.append(f"edge {edge}: expected {want}, got {got}")
+
+          # Sterility alone binds in some seeds, and is never the commonest
+          # ending in any cell: a real limit, and a rare one.
+          seeds = {r["seed"] for r in rows}
+          if not any(r["ending"] == "sterile" for r in rows):
+              fail.append("sterility alone never bound in any seed")
+          cells = {}
+          for r in rows:
+              cells.setdefault((r["viable_edge"], r["fraction"]), []).append(r["ending"])
+          for cell, endings in cells.items():
+              if endings.count("sterile") * 2 > len(endings):
+                  fail.append(f"sterility alone was the majority ending at {cell}")
+          # Sterility is credited only where the ungated chain went deeper.
+          for r in rows:
+              if r["ending"] == "sterile" and int(r["ungated_depth"]) <= int(r["gated_depth"]):
+                  fail.append(f"seed {r['seed']}: sterility credited without the gate binding")
+                  break
+
+          if fail:
+              print("\nFAILED:", *fail, sep="\n  ")
+              sys.exit(1)
+          print(f"\nthe map holds over {len(seeds)} seeds")
           PY
 
   wasm:

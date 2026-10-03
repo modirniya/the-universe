@@ -1,11 +1,14 @@
-# The v0.1 universe. Sized so the full experiment finishes in well under a
-# minute on an M1 Air without the fans having an opinion about it.
+# The v0.1 universe. One seed finishes in about 11 s on an M1 Air; the
+# ensemble below runs the pinned seed alone, then the other 19 across all cores.
+# Pass `--seeds 1` for the single pinned run.
 
 [world]
 width = 128          # base cells; subdividing space multiplies this internally
 height = 128
 ticks = 200
 seed = 42            # same seed, same universe
+seeds = 20           # an ensemble: seed 42 is the pinned example, 19 more make it a finding
+seed_stride = 1000   # seeds 42, 1042, 2042, ...; must exceed 1, the control runs at seed + 1
 init_density = 0.30  # fraction alive at the input event
 
 # A life-like rule written in densities rather than neighbour counts, so the

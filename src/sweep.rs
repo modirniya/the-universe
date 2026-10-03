@@ -27,6 +27,10 @@
 //! Falsified within the model if: complexity turns out to be common across the
 //! parameter space. The fine-tuning claim needs the interesting band to be
 //! *narrow*, and a sweep that finds most settings productive refutes it.
+//!
+//! Because the bar is a choice, [`run_sensitivity`] repeats the question under
+//! two criteria that never look at Conway, over all four constants of the rule.
+//! The result is reported as a range across criteria, never as one number.
 
 use crate::config::Config;
 use crate::constraints::{Constraints, Resolved};
@@ -351,6 +355,265 @@ fn lerp(min: f64, max: f64, i: usize, steps: usize) -> f64 {
     min + (max - min) * (i as f64 / (steps - 1) as f64)
 }
 
+// ---------------------------------------------------------------------------
+// Sensitivity: does the answer survive a change of criterion?
+// ---------------------------------------------------------------------------
+//
+// The sweep above answers with one criterion, calibrated from Conway, over two
+// of the rule's four constants. Both are choices, and a fine-tuning number is
+// only worth quoting if it survives changing them. So this section widens the
+// space to all four constants (both centres and both half-widths) and scores
+// every law it reaches by three criteria, two of which never look at Conway.
+// The productive share is then reported as a range across criteria rather
+// than as a value.
+//
+// Every setting collapses onto a law (see [`rule_signature`]), and two
+// settings denoting the same law produce the same universe, so each distinct
+// law is run once.
+
+/// Half-widths swept for each band. The first two are Conway's.
+pub const HALF_WIDTHS: &[f64] = &[0.0625, 0.125, 0.1875];
+
+/// A rule from all four constants.
+pub fn rules_with(
+    birth_centre: f64,
+    survive_centre: f64,
+    birth_half: f64,
+    survive_half: f64,
+) -> Rules {
+    Rules {
+        birth_lo: birth_centre - birth_half,
+        birth_hi: birth_centre + birth_half,
+        survive_lo: survive_centre - survive_half,
+        survive_hi: survive_centre + survive_half,
+    }
+}
+
+/// Everything the three criteria look at, for one law.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Profile {
+    pub final_live: f64,
+    pub activity: f64,
+    pub dispersion: f64,
+    /// Runs in the final field, read row by row, as a share of what
+    /// independent cells at the same density would give. 1 is noise; near 0
+    /// is one uniform block; in between is structure.
+    pub compressibility: f64,
+    /// How far a single flipped cell spreads. One cell is flipped at mid-run
+    /// and both universes are run to the end; the cells that then differ are
+    /// divided by what two independent fields of the final density would
+    /// differ by. 0 is a perturbation that died; 1 is complete decorrelation.
+    pub growth: f64,
+}
+
+/// Run one law and measure everything every criterion needs.
+pub fn profile(cfg: &Config, rules: &Rules) -> Profile {
+    let mut constraints = Constraints::ALL_ON;
+    constraints.lazy_rendering = false;
+    let res = Resolved::new(&constraints, &cfg.params);
+    let geom = Geometry::new(
+        cfg.world.width,
+        cfg.world.height,
+        res.subdivision,
+        res.block_size,
+    );
+
+    let mut world = World::seed(geom, cfg.world.seed, cfg.world.init_density);
+    let mut twin: Option<World> = None;
+    let mut prev_field = world.macro_field(cfg.report.macro_grid);
+    let half = cfg.world.ticks / 2;
+    let cells_per_macro =
+        (geom.cells() as f64 / (cfg.report.macro_grid * cfg.report.macro_grid) as f64).max(1.0);
+    let (mut activity, mut dispersion, mut counted) = (0.0, 0.0, 0u64);
+
+    for t in 0..cfg.world.ticks {
+        if t == half {
+            // The perturbation: one cell, at the centre, in a copy.
+            let mut copy = world.clone();
+            let i = copy.geom.idx(copy.geom.w / 2, copy.geom.h / 2);
+            copy.cells[i] ^= 1;
+            twin = Some(copy);
+        }
+        let (observed, _) = observe(&world, &cfg.observer, t, cfg.world.seed, res.lazy);
+        let (advanced, _) = tick(&observed, rules, &res);
+        if let Some(other) = twin.take() {
+            let (o, _) = observe(&other, &cfg.observer, t, cfg.world.seed, res.lazy);
+            twin = Some(tick(&o, rules, &res).0);
+        }
+
+        let field = advanced.macro_field(cfg.report.macro_grid);
+        if t >= half {
+            activity += macro_divergence(&prev_field, &field);
+            dispersion += dispersion_of(&field, cells_per_macro);
+            counted += 1;
+        }
+        prev_field = field;
+        world = advanced;
+    }
+
+    let n = counted.max(1) as f64;
+    let p = world.live_fraction();
+    Profile {
+        final_live: p,
+        activity: activity / n,
+        dispersion: dispersion / n,
+        compressibility: runs_ratio(&world.cells, p),
+        growth: twin.map_or(0.0, |other| {
+            let differ = world
+                .cells
+                .iter()
+                .zip(&other.cells)
+                .filter(|(a, b)| a != b)
+                .count() as f64;
+            let independent = 2.0 * p * (1.0 - p) * world.cells.len() as f64;
+            if independent > 0.0 {
+                differ / independent
+            } else {
+                0.0
+            }
+        }),
+    }
+}
+
+/// Runs in a bit string, against what independent bits at density `p` give.
+fn runs_ratio(cells: &[u8], p: f64) -> f64 {
+    if cells.len() < 2 {
+        return 0.0;
+    }
+    let runs = 1 + cells.windows(2).filter(|w| w[0] != w[1]).count();
+    let expected = 1.0 + (cells.len() - 1) as f64 * 2.0 * p * (1.0 - p);
+    if expected <= 1.0 {
+        return 0.0;
+    }
+    (runs as f64 - 1.0) / (expected - 1.0)
+}
+
+/// A universe must be neither empty nor saturated to be called anything, under
+/// every criterion. Shared so that the criteria differ only where they mean to.
+pub const LIVE_BAND: (f64, f64) = (0.005, 0.95);
+
+/// One way of deciding that a law is productive.
+#[derive(Clone, Copy, Debug)]
+pub enum Criterion {
+    /// The sweep's own bar: within a factor of four of Conway on activity and
+    /// spatial dispersion. Measures resemblance to Conway.
+    Conway(Bar),
+    /// Structured but not uniform: fewer runs than noise, more than a block.
+    /// The band is fixed in advance and never looks at Conway.
+    Compressibility { lo: f64, hi: f64 },
+    /// A single flipped cell neither dies out nor decorrelates the world:
+    /// the edge between order and chaos, measured directly. Fixed in advance.
+    Growth { lo: f64, hi: f64 },
+}
+
+/// The two criteria that do not look at Conway, with their bands.
+pub const COMPRESSIBILITY: Criterion = Criterion::Compressibility { lo: 0.2, hi: 0.8 };
+pub const GROWTH: Criterion = Criterion::Growth { lo: 1e-9, hi: 0.5 };
+
+impl Criterion {
+    pub fn label(&self) -> &'static str {
+        match self {
+            Criterion::Conway(_) => "resembles conway",
+            Criterion::Compressibility { .. } => "compressibility",
+            Criterion::Growth { .. } => "perturbation growth",
+        }
+    }
+
+    pub fn admits(&self, p: &Profile) -> bool {
+        let live = (LIVE_BAND.0..=LIVE_BAND.1).contains(&p.final_live);
+        live && match self {
+            Criterion::Conway(bar) => {
+                (bar.min_activity..=bar.max_activity).contains(&p.activity)
+                    && (bar.min_dispersion..=bar.max_dispersion).contains(&p.dispersion)
+            }
+            Criterion::Compressibility { lo, hi } => (*lo..=*hi).contains(&p.compressibility),
+            Criterion::Growth { lo, hi } => (*lo..=*hi).contains(&p.growth),
+        }
+    }
+}
+
+/// Every distinct law the widened sweep reaches, scored every way.
+#[derive(Clone, Debug)]
+pub struct Sensitivity {
+    /// Each distinct law, once, in signature order, and whether it used
+    /// Conway's half-widths.
+    pub laws: Vec<(u32, bool, Profile)>,
+    pub criteria: Vec<Criterion>,
+    /// Conway's own profile, so the report can say which criteria it passes.
+    pub conway: Profile,
+}
+
+impl Sensitivity {
+    /// Share of distinct laws a criterion admits.
+    ///
+    /// `fixed_widths` restricts to laws reachable with Conway's half-widths,
+    /// the space the original sweep covered.
+    pub fn fraction(&self, criterion: usize, fixed_widths: bool) -> f64 {
+        let c = &self.criteria[criterion];
+        let pool: Vec<&Profile> = self
+            .laws
+            .iter()
+            .filter(|(_, fixed, _)| *fixed || !fixed_widths)
+            .map(|(_, _, p)| p)
+            .collect();
+        if pool.is_empty() {
+            return 0.0;
+        }
+        pool.iter().filter(|p| c.admits(p)).count() as f64 / pool.len() as f64
+    }
+
+    pub fn law_count(&self, fixed_widths: bool) -> usize {
+        self.laws
+            .iter()
+            .filter(|(_, fixed, _)| *fixed || !fixed_widths)
+            .count()
+    }
+
+    /// Lowest and highest productive share across criteria, widened space.
+    pub fn range(&self) -> (f64, f64) {
+        (0..self.criteria.len())
+            .map(|i| self.fraction(i, false))
+            .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), v| {
+                (lo.min(v), hi.max(v))
+            })
+    }
+}
+
+/// Widen the sweep to all four constants and score each law three ways.
+pub fn run_sensitivity(cfg: &Config, steps: usize, min: f64, max: f64) -> Sensitivity {
+    // Each law once. A law reachable with Conway's half-widths is marked so
+    // the original two-constant space can be recovered from the same runs.
+    let mut laws: std::collections::BTreeMap<u32, (Rules, bool)> = Default::default();
+    for &bh in HALF_WIDTHS {
+        for &sh in HALF_WIDTHS {
+            let fixed = bh == BIRTH_HALF_WIDTH && sh == SURVIVE_HALF_WIDTH;
+            for row in 0..steps {
+                for col in 0..steps {
+                    let r = rules_with(
+                        lerp(min, max, col, steps),
+                        lerp(min, max, row, steps),
+                        bh,
+                        sh,
+                    );
+                    let e = laws.entry(rule_signature(&r)).or_insert((r, fixed));
+                    e.1 |= fixed;
+                }
+            }
+        }
+    }
+
+    let conway = profile(cfg, &rules_at(CONWAY_BIRTH_CENTRE, CONWAY_SURVIVE_CENTRE));
+    let (bar, _) = calibrate(cfg);
+    Sensitivity {
+        laws: laws
+            .into_iter()
+            .map(|(sig, (r, fixed))| (sig, fixed, profile(cfg, &r)))
+            .collect(),
+        criteria: vec![Criterion::Conway(bar), COMPRESSIBILITY, GROWTH],
+        conway,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -368,6 +631,8 @@ mod tests {
                 ticks: 60,
                 seed: 42,
                 init_density: 0.3,
+                seeds: 1,
+                seed_stride: 1000,
             },
             rules: Rules::default(),
             constraints: Constraints::ALL_ON,
@@ -557,5 +822,62 @@ mod tests {
         let a = run_sweep(&c, 3, 0.2, 0.5, |_, _| {});
         let b = run_sweep(&c, 3, 0.2, 0.5, |_, _| {});
         assert_eq!(a.grid, b.grid);
+    }
+
+    #[test]
+    fn a_uniform_field_has_no_runs_and_noise_has_about_one() {
+        assert_eq!(runs_ratio(&[1; 64], 1.0), 0.0);
+        assert_eq!(runs_ratio(&[0; 64], 0.0), 0.0);
+        // Strict alternation has every possible run: twice what noise at
+        // density one half would give.
+        let alt: Vec<u8> = (0..64).map(|i| (i % 2) as u8).collect();
+        assert!((runs_ratio(&alt, 0.5) - 2.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn the_criteria_can_disagree_about_one_law() {
+        let p = Profile {
+            final_live: 0.1,
+            activity: 0.0,
+            dispersion: 0.0,
+            compressibility: 0.5,
+            growth: 0.0,
+        };
+        assert!(COMPRESSIBILITY.admits(&p), "structured");
+        assert!(!GROWTH.admits(&p), "but a perturbation dies in it");
+    }
+
+    #[test]
+    fn no_criterion_admits_an_empty_universe() {
+        let p = Profile {
+            final_live: 0.0,
+            activity: 0.0,
+            dispersion: 0.0,
+            compressibility: 0.5,
+            growth: 0.3,
+        };
+        assert!(!COMPRESSIBILITY.admits(&p));
+        assert!(!GROWTH.admits(&p));
+    }
+
+    #[test]
+    fn the_widened_space_contains_the_original_one() {
+        let c = cfg();
+        let sens = run_sensitivity(&c, 3, 0.05, 0.65);
+        let sw = run_sweep(&c, 3, 0.05, 0.65, |_, _| {});
+        assert_eq!(sens.law_count(true), sw.distinct_rules());
+        assert!(sens.law_count(false) > sens.law_count(true));
+        // The Conway criterion at Conway's widths is the original sweep.
+        assert_eq!(sens.fraction(0, true), sw.productive_rule_fraction());
+    }
+
+    #[test]
+    fn a_perturbation_spreads_or_dies_but_never_negatively() {
+        let p = profile(
+            &cfg(),
+            &rules_at(CONWAY_BIRTH_CENTRE, CONWAY_SURVIVE_CENTRE),
+        );
+        assert!(p.growth >= 0.0 && p.growth.is_finite());
+        assert!(p.compressibility >= 0.0);
     }
 }

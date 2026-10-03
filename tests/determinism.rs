@@ -23,6 +23,8 @@ fn cfg(seed: u64) -> Config {
             ticks: 25,
             seed,
             init_density: 0.3,
+            seeds: 1,
+            seed_stride: 1000,
         },
         rules: Rules::default(),
         constraints: Constraints::ALL_ON,

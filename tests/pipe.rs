@@ -113,12 +113,12 @@ fn a_different_seed_sends_a_different_history() {
         a.received
             .all()
             .iter()
-            .map(|m| m.digest)
+            .map(|m| m.digest())
             .collect::<Vec<_>>(),
         b.received
             .all()
             .iter()
-            .map(|m| m.digest)
+            .map(|m| m.digest())
             .collect::<Vec<_>>()
     );
 }
@@ -143,4 +143,61 @@ fn the_json_is_balanced() {
 fn the_summary_says_the_blindness_is_compiler_enforced() {
     let s = report::pipe_summary(&relay(&cfg()));
     assert!(s.contains("enforced by the compiler"));
+}
+
+#[test]
+fn the_widest_channel_is_the_pipe_as_it_always_was() {
+    // 128 bits is an exact magnitude and a full digest. The width sweep's
+    // widest row and the relay's own read end must agree exactly.
+    let r = relay(&cfg());
+    let rows = r.width_sweep();
+    assert_eq!(rows.len(), pipe::WIDTHS.len());
+    let widest = rows.last().unwrap();
+    assert_eq!(widest.bits, pipe::MAX_BITS);
+    assert_eq!(widest.correlation, r.magnitude_correlation());
+}
+
+#[test]
+fn a_few_bits_carry_most_of_what_crosses() {
+    // Measured, not designed: how narrow the channel can get before the
+    // parent's view stops tracking the child.
+    let r = relay(&cfg());
+    let bits = r.width_for(0.9).expect("some width keeps 90%");
+    assert!(bits <= 8, "needed {bits} bits for 90% of the correlation");
+    let full = r.magnitude_correlation();
+    for w in r.width_sweep().iter().filter(|w| w.bits >= 8) {
+        assert!(
+            (w.correlation - full).abs() < 0.01,
+            "{} bits: {} against {full}",
+            w.bits,
+            w.correlation
+        );
+    }
+}
+
+#[test]
+fn one_bit_carries_nothing_at_these_occupancies() {
+    // The horizon is never more than half full, so a one-bit channel sends
+    // the same value every tick and there is no correlation to report.
+    let r = relay(&cfg());
+    let one = r.width_sweep()[0];
+    assert_eq!(one.bits, 1);
+    assert_eq!(one.levels_seen, 1);
+    assert!(one.correlation.is_nan());
+}
+
+#[test]
+fn narrowing_the_channel_is_not_monotone_at_the_bottom() {
+    // Pinned so the README cannot quietly claim otherwise: at seed 42 three
+    // bits track the child worse than two. Coarse quantisation can cost more
+    // than one extra level gains.
+    let r = relay(&cfg());
+    let at = |b: u32| {
+        r.width_sweep()
+            .into_iter()
+            .find(|w| w.bits == b)
+            .unwrap()
+            .correlation
+    };
+    assert!(at(3) < at(2));
 }

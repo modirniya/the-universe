@@ -11,12 +11,12 @@
 //! output format is part of the claim, so it is worth being able to read the
 //! code that produces it.
 
-use crate::bootloader::BootChain;
+use crate::bootloader::{BootChain, BootLayer, EdgeCell, Ending};
 use crate::detector::Finding;
-use crate::experiment::{Comparison, Experiment};
+use crate::experiment::{self, Comparison, Ensemble, Experiment, Spread};
 use crate::layer::Chain;
-use crate::pipe::{self, Horizon, Relay};
-use crate::sweep::{self, Sweep};
+use crate::pipe::{self, Relay};
+use crate::sweep::{self, Sensitivity, Sweep};
 use std::fmt::Write as _;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -228,6 +228,14 @@ fn floor_ratio(d: f64, floor: f64) -> f64 {
 const NOTICEABLE: f64 = 1.25;
 const CHEAP: f64 = 0.9;
 
+/// Which of the numbers above could have come out otherwise.
+///
+/// The work and memory columns are arithmetic on the config: fewer cells,
+/// fewer substeps, a smaller radius, fewer resolved blocks. Printing them as
+/// if they were measured would overstate what the run adds.
+const EARNED: &str = "the work and memory ratios follow from the rules by arithmetic; \
+only the divergences had to be run to be known.\n";
+
 /// State what the numbers support, and refuse to overstate it.
 fn verdict(exp: &Experiment) -> String {
     let mut s = String::new();
@@ -277,6 +285,221 @@ fn verdict(exp: &Experiment) -> String {
         s.push_str("no limit was both cheap and invisible at this threshold\n");
     }
 
+    s.push_str(EARNED);
+    s.push_str(
+        "\nthis says the limits are coherent as optimizations inside this model. \
+         it says nothing about whether our universe works this way.\n",
+    );
+    s
+}
+
+// ---------------------------------------------------------------------------
+// Theory 1 across seeds
+// ---------------------------------------------------------------------------
+
+/// `mean [min, max]`, the one way a spread is printed anywhere in a report.
+pub fn spread_cell(sp: &Spread, digits: usize) -> String {
+    if sp.n == 0 {
+        return "n/a".to_string();
+    }
+    format!(
+        "{:.d$} [{:.d$}, {:.d$}]",
+        sp.mean,
+        sp.min,
+        sp.max,
+        d = digits
+    )
+}
+
+/// One spread as a JSON object.
+pub fn spread_json(sp: &Spread) -> String {
+    format!(
+        "{{\"mean\": {}, \"min\": {}, \"max\": {}, \"n\": {}}}",
+        json_f64(sp.mean),
+        json_f64(sp.min),
+        json_f64(sp.max),
+        sp.n
+    )
+}
+
+fn json_f64(v: f64) -> String {
+    if v.is_finite() {
+        format!("{v:.6}")
+    } else {
+        "null".to_string()
+    }
+}
+
+/// Seeds an ensemble ran, as printed in every ensemble header.
+pub fn seed_list(seeds: &[u64]) -> String {
+    match seeds {
+        [] => String::new(),
+        [only] => only.to_string(),
+        [first, .., last] => format!("{first}, ..., {last}"),
+    }
+}
+
+const ENSEMBLE_COLUMNS: &[&str] = &[
+    "seed",
+    "label",
+    "work_ratio",
+    "memory_ratio",
+    "mean_divergence",
+    "chaos_floor",
+    "vs_floor",
+    "live_delta",
+    "chaos_floor_live",
+];
+
+pub fn ensemble_to_csv(ens: &Ensemble) -> String {
+    let mut s = ENSEMBLE_COLUMNS.join(",");
+    s.push('\n');
+    for (seed, e) in &ens.runs {
+        for c in &e.comparisons {
+            let _ = writeln!(
+                s,
+                "{seed},{},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6}",
+                c.run.label,
+                c.work_ratio,
+                c.memory_ratio,
+                c.mean_divergence,
+                e.chaos_floor,
+                experiment::vs_floor(c, e),
+                c.live_delta,
+                e.chaos_floor_live,
+            );
+        }
+    }
+    s
+}
+
+pub fn ensemble_to_json(ens: &Ensemble) -> String {
+    let n = ens.len();
+    let seeds: Vec<String> = ens.runs.iter().map(|(s, _)| s.to_string()).collect();
+    let mut s = String::from("{\n");
+    let _ = writeln!(s, "  \"seeds\": [{}],", seeds.join(", "));
+    let _ = writeln!(s, "  \"chaos_floor\": {},", spread_json(&ens.floor()));
+    s.push_str("  \"limits\": [\n");
+    let labels = ens.labels();
+    for (i, label) in labels.iter().enumerate() {
+        let _ = write!(
+            s,
+            "    {{\"label\": \"{label}\", \"work_ratio\": {}, \"memory_ratio\": {}, \
+             \"mean_divergence\": {}, \"vs_floor\": {}, \"live_delta\": {}, \
+             \"below_floor\": {}, \"unnoticeable\": {}, \"free\": {}, \"seeds\": {n}}}",
+            spread_json(&ens.spread(label, |c, _| c.work_ratio)),
+            spread_json(&ens.spread(label, |c, _| c.memory_ratio)),
+            spread_json(&ens.spread(label, |c, _| c.mean_divergence)),
+            spread_json(&ens.spread(label, experiment::vs_floor)),
+            spread_json(&ens.spread(label, |c, _| c.live_delta)),
+            ens.count(label, |c, e| experiment::vs_floor(c, e) <= 1.0),
+            ens.count(label, |c, e| experiment::vs_floor(c, e) <= NOTICEABLE),
+            ens.count(label, is_free),
+        );
+        if i + 1 < labels.len() {
+            s.push(',');
+        }
+        s.push('\n');
+    }
+    s.push_str("  ]\n}\n");
+    s
+}
+
+pub fn write_ensemble(ens: &Ensemble, out_dir: &Path) -> io::Result<Written> {
+    std::fs::create_dir_all(out_dir)?;
+    let csv = out_dir.join("ensemble.csv");
+    let json = out_dir.join("ensemble.json");
+    std::fs::write(&csv, ensemble_to_csv(ens))?;
+    std::fs::write(&json, ensemble_to_json(ens))?;
+    Ok(Written { csv, json })
+}
+
+/// The same rule [`verdict`] applies to one seed: cheap, and no more visible
+/// than a change of seed.
+fn is_free(c: &Comparison, e: &Experiment) -> bool {
+    c.work_ratio < CHEAP && experiment::vs_floor(c, e) <= NOTICEABLE
+}
+
+/// Theory 1 across seeds. Wall time is absent on purpose: all but the pinned
+/// seed ran in parallel, so their clocks measured contention, not cost.
+pub fn ensemble_summary(ens: &Ensemble) -> String {
+    let mut s = String::new();
+    let n = ens.len();
+    let seeds: Vec<u64> = ens.runs.iter().map(|(s, _)| *s).collect();
+    let _ = writeln!(s, "ensemble: {n} seeds ({})", seed_list(&seeds));
+    let _ = writeln!(
+        s,
+        "chaos floor across seeds: {}",
+        spread_cell(&ens.floor(), 5)
+    );
+    let _ = writeln!(
+        s,
+        "each limit is judged against the floor of its own seed. wall time is not shown:\n\
+         every seed after the first ran in parallel, so its clock measured contention.\n"
+    );
+    let _ = writeln!(
+        s,
+        "{:<8} {:>8} {:>8}  {:<26} {:>7} {:>7} {:>7}",
+        "limit", "work", "memory", "vs floor: mean [min, max]", "below", "<=1.25", "free"
+    );
+    let _ = writeln!(s, "{}", "-".repeat(80));
+    for label in ens.labels() {
+        let _ = writeln!(
+            s,
+            "{:<8} {:>7.3}x {:>7.3}x  {:<26} {:>7} {:>7} {:>7}",
+            label,
+            ens.spread(&label, |c, _| c.work_ratio).mean,
+            ens.spread(&label, |c, _| c.memory_ratio).mean,
+            spread_cell(&ens.spread(&label, experiment::vs_floor), 2),
+            format!(
+                "{}/{n}",
+                ens.count(&label, |c, e| experiment::vs_floor(c, e) <= 1.0)
+            ),
+            format!(
+                "{}/{n}",
+                ens.count(&label, |c, e| experiment::vs_floor(c, e) <= NOTICEABLE)
+            ),
+            format!("{}/{n}", ens.count(&label, is_free)),
+        );
+    }
+    s.push('\n');
+    s.push_str(&ensemble_verdict(ens));
+    s
+}
+
+fn ensemble_verdict(ens: &Ensemble) -> String {
+    let mut s = String::new();
+    let n = ens.len();
+    let mut always = Vec::new();
+    let mut sometimes = Vec::new();
+    let mut never = Vec::new();
+    for label in ens.labels() {
+        if label == "all_on" {
+            continue;
+        }
+        let k = ens.count(&label, is_free);
+        if k == n {
+            always.push(label);
+        } else if k > 0 {
+            sometimes.push(format!("{label} ({k}/{n})"));
+        } else {
+            never.push(label);
+        }
+    }
+    if !always.is_empty() {
+        let _ = writeln!(s, "free in every seed: {}", always.join(", "));
+    }
+    if !sometimes.is_empty() {
+        let _ = writeln!(
+            s,
+            "free in some seeds only, so not a stable finding: {}",
+            sometimes.join(", ")
+        );
+    }
+    if !never.is_empty() {
+        let _ = writeln!(s, "free in no seed: {}", never.join(", "));
+    }
+    s.push_str(EARNED);
     s.push_str(
         "\nthis says the limits are coherent as optimizations inside this model. \
          it says nothing about whether our universe works this way.\n",
@@ -518,7 +741,7 @@ pub fn pipe_to_json(relay: &Relay) -> String {
         s,
         "  \"content_bits\": {}, \"message_bits\": {}, \"compression_ratio\": {:.8},",
         relay.horizon.content_bits(),
-        Horizon::MESSAGE_BITS,
+        relay.horizon.message_bits(),
         relay.horizon.compression_ratio()
     );
     let _ = writeln!(
@@ -541,7 +764,31 @@ pub fn pipe_to_json(relay: &Relay) -> String {
         }
         s.push('\n');
     }
+    s.push_str("  ],\n  \"widths\": [\n");
+    let widths = relay.width_sweep();
+    for (i, w) in widths.iter().enumerate() {
+        let _ = write!(
+            s,
+            "    {{\"bits\": {}, \"levels_seen\": {}, \"correlation\": {}}}",
+            w.bits,
+            w.levels_seen,
+            json_f64(w.correlation)
+        );
+        if i + 1 < widths.len() {
+            s.push(',');
+        }
+        s.push('\n');
+    }
     s.push_str("  ]\n}\n");
+    s
+}
+
+/// The channel-width sweep, one row per width.
+pub fn widths_to_csv(relay: &Relay) -> String {
+    let mut s = String::from("bits,levels_seen,correlation\n");
+    for w in relay.width_sweep() {
+        let _ = writeln!(s, "{},{},{:.6}", w.bits, w.levels_seen, w.correlation);
+    }
     s
 }
 
@@ -551,6 +798,7 @@ pub fn write_pipe(relay: &Relay, out_dir: &Path) -> io::Result<Written> {
     let json = out_dir.join("pipe.json");
     std::fs::write(&csv, pipe_to_csv(relay))?;
     std::fs::write(&json, pipe_to_json(relay))?;
+    std::fs::write(out_dir.join("widths.csv"), widths_to_csv(relay))?;
     Ok(Written { csv, json })
 }
 
@@ -566,7 +814,7 @@ pub fn pipe_summary(relay: &Relay) -> String {
         h.x,
         h.y,
         h.content_bits(),
-        Horizon::MESSAGE_BITS
+        h.message_bits()
     );
     let _ = writeln!(
         s,
@@ -606,6 +854,22 @@ pub fn pipe_summary(relay: &Relay) -> String {
         );
     }
 
+    let _ = writeln!(
+        s,
+        "\nthe same child read through narrower channels at once:\n\n\
+         {:>6}  {:>8}  {:>12}",
+        "bits", "levels", "correlation"
+    );
+    let _ = writeln!(s, "{}", "-".repeat(30));
+    for w in relay.width_sweep() {
+        let corr = if w.correlation.is_nan() {
+            "constant".to_string()
+        } else {
+            format!("{:.4}", w.correlation)
+        };
+        let _ = writeln!(s, "{:>6}  {:>8}  {corr:>12}", w.bits, w.levels_seen);
+    }
+
     s.push('\n');
     s.push_str(&pipe_verdict(relay));
     s
@@ -616,17 +880,30 @@ fn pipe_verdict(relay: &Relay) -> String {
     let a = relay.content_avalanche;
     let c = relay.magnitude_correlation();
 
-    if (0.35..=0.65).contains(&a) {
+    // What is designed in, said first and plainly, so nothing below reads as
+    // a discovery when it is a definition.
+    s.push_str(
+        "designed in, not found: a message has a magnitude and a digest, and the digest\n\
+         is a hash. that magnitude crosses and arrangement scatters follows from that.\n",
+    );
+
+    if a.is_nan() {
         let _ = writeln!(
             s,
-            "content did not survive: a one-cell change scatters the digest, so comparing\n\
-             digests recovers nothing about the arrangement"
+            "no digest crossed at this width, so there was no arrangement to scatter"
+        );
+    } else if (0.35..=0.65).contains(&a) {
+        let _ = writeln!(
+            s,
+            "the fold behaves as a hash ({:.1}% of digest bits flip on a one-cell change):\n\
+             a check on how it was built, not a result about pipes",
+            a * 100.0
         );
     } else {
         let _ = writeln!(
             s,
-            "content partly survived ({a:.3} avalanche) -- the fold is not destroying structure\n\
-             the way a serializing write should"
+            "the fold does NOT behave as a hash ({a:.3} avalanche): the digest leaks the\n\
+             arrangement, and the pipe is not the serializing write it claims to be"
         );
     }
 
@@ -635,19 +912,24 @@ fn pipe_verdict(relay: &Relay) -> String {
             s,
             "magnitude carried nothing measurable: the child never varied"
         );
-    } else if c.abs() >= 0.5 {
-        let _ = writeln!(
-            s,
-            "timing and magnitude did survive: what crossed tracks the child at {c:.4}, from a\n\
-             channel carrying {:.2}% of the information",
-            relay.horizon.compression_ratio() * 100.0
-        );
     } else {
         let _ = writeln!(
             s,
-            "timing and magnitude survived only weakly ({c:.4}); the keyhole is a poor guide to\n\
-             the room"
+            "\nmeasured: what crossed tracks the child at {c:.4}, from a channel carrying\n\
+             {:.2}% of the information",
+            relay.horizon.compression_ratio() * 100.0
         );
+        match relay.width_for(0.9) {
+            Some(bits) => {
+                let _ = writeln!(
+                    s,
+                    "measured: {bits} bits per tick are enough to keep 90% of that correlation"
+                );
+            }
+            None => {
+                let _ = writeln!(s, "no narrower channel kept 90% of that correlation");
+            }
+        }
     }
 
     // Where the parent stops seeing anything at all.
@@ -683,6 +965,8 @@ const DETECT_COLUMNS: &[&str] = &[
     "influence_speed_without",
     "smoothness_with",
     "smoothness_without",
+    "anisotropy_with",
+    "anisotropy_without",
 ];
 
 pub fn detect_to_csv(findings: &[Finding]) -> String {
@@ -691,7 +975,7 @@ pub fn detect_to_csv(findings: &[Finding]) -> String {
     for f in findings {
         let _ = writeln!(
             s,
-            "{},{},{},{:.6},{:.6},{},{:.6},{:.6},{:.6},{:.6}",
+            "{},{},{},{:.6},{:.6},{},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6}",
             f.gaze.label(),
             f.limit,
             f.signal,
@@ -702,13 +986,28 @@ pub fn detect_to_csv(findings: &[Finding]) -> String {
             f.without.influence_speed,
             f.with.smoothness,
             f.without.smoothness,
+            f.with.anisotropy(),
+            f.without.anisotropy(),
         );
     }
     s
 }
 
 pub fn detect_to_json(findings: &[Finding]) -> String {
-    let mut s = String::from("{\n  \"limits\": [\n");
+    let mut s = String::from("{\n");
+    if let Some(iso) = crate::detector::isotropy(findings) {
+        let _ = writeln!(
+            s,
+            "  \"isotropy\": {{\"lattice\": {}, \"finer\": {}, \"isotropic\": {:.1}, \
+             \"found\": {}, \"separates_scale\": {}}},",
+            json_f64(iso.lattice),
+            json_f64(iso.finer),
+            crate::detector::ISOTROPIC,
+            iso.found,
+            iso.separates_scale
+        );
+    }
+    s.push_str("  \"limits\": [\n");
     for (i, f) in findings.iter().enumerate() {
         let _ = write!(
             s,
@@ -811,8 +1110,50 @@ pub fn detect_summary(findings: &[Finding]) -> String {
         let _ = writeln!(s, "{:<16} {}", f.limit, f.note);
     }
 
+    if let Some(iso) = crate::detector::isotropy(findings) {
+        s.push('\n');
+        s.push_str(&isotropy_summary(findings, &iso));
+    }
+
     s.push('\n');
     s.push_str(&detect_verdict(findings));
+    s
+}
+
+/// Is space the same in every direction? Asked of one universe, against the
+/// geometry of a continuum rather than against a second run.
+fn isotropy_summary(findings: &[Finding], iso: &crate::detector::Isotropy) -> String {
+    let mut s = String::new();
+    let Some(f) = findings.iter().find(|f| f.limit == "discrete_space") else {
+        return s;
+    };
+    let _ = writeln!(
+        s,
+        "is space isotropic? influence reaches {:.2} cells along an axis and {:.2} on a\n\
+         diagonal: anisotropy {:.4}, against {:.0} for an isotropic continuum",
+        f.with.axis_reach,
+        f.with.diagonal_reach,
+        iso.lattice,
+        crate::detector::ISOTROPIC
+    );
+    if iso.found {
+        s.push_str("the shape of the lattice is visible from inside.\n");
+    } else {
+        s.push_str("no preferred direction was measurable.\n");
+    }
+    if iso.separates_scale {
+        let _ = writeln!(
+            s,
+            "a finer lattice reads {:.4}, so the shape gives the scale away too.",
+            iso.finer
+        );
+    } else {
+        let _ = writeln!(
+            s,
+            "a finer lattice reads {:.4}, the same shape, so the scale stays hidden.",
+            iso.finer
+        );
+    }
     s
 }
 
@@ -831,6 +1172,12 @@ fn detect_verdict(findings: &[Finding]) -> String {
 
     if !found.is_empty() {
         let _ = writeln!(s, "findable from inside: {}", found.join(", "));
+    }
+    if crate::detector::isotropy(findings).is_some_and(|i| i.found) {
+        let _ = writeln!(
+            s,
+            "findable from inside, absolutely: that space is a lattice with preferred directions"
+        );
     }
     if !hidden.is_empty() {
         let _ = writeln!(s, "leaves no fingerprint: {}", hidden.join(", "));
@@ -1237,6 +1584,849 @@ fn boot_verdict(chain: &BootChain) -> String {
     s
 }
 
+// ---------------------------------------------------------------------------
+// The other experiments across seeds
+// ---------------------------------------------------------------------------
+//
+// Each takes the per-seed results in seed order, pinned seed first, and writes
+// one row per seed to `ensemble.csv` beside that experiment's own files. Every
+// summary reports spreads, never a lone value, and ends by declining to
+// overstate what an ensemble of a toy shows.
+
+const ENSEMBLE_CLOSER: &str = "\nmore seeds make this a finding about the model rather than about one universe in \
+it. they say nothing about whether our universe works this way.\n";
+
+fn ensemble_header(s: &mut String, seeds: &[u64]) {
+    let _ = writeln!(s, "ensemble: {} seeds ({})", seeds.len(), seed_list(seeds));
+}
+
+fn write_rows(out_dir: &Path, csv: String) -> io::Result<PathBuf> {
+    std::fs::create_dir_all(out_dir)?;
+    let path = out_dir.join("ensemble.csv");
+    std::fs::write(&path, csv)?;
+    Ok(path)
+}
+
+/// Whether churn fell at every step down a chain.
+fn churn_falls(chain: &Chain) -> bool {
+    chain.layers.windows(2).all(|w| w[1].churn < w[0].churn)
+}
+
+pub fn chain_ensemble_summary(runs: &[(u64, Chain)]) -> String {
+    let mut s = String::new();
+    let seeds: Vec<u64> = runs.iter().map(|(s, _)| *s).collect();
+    let n = runs.len();
+    ensemble_header(&mut s, &seeds);
+    let _ = writeln!(
+        s,
+        "depth built: {}",
+        spread_cell(
+            &Spread::of(runs.iter().map(|(_, c)| c.layers.len() as f64)),
+            2
+        )
+    );
+    let deepest = runs.iter().map(|(_, c)| c.layers.len()).max().unwrap_or(0);
+    let _ = writeln!(
+        s,
+        "\n{:>5}  {:>6}  {:<30}",
+        "depth", "seeds", "churn: mean [min, max]"
+    );
+    let _ = writeln!(s, "{}", "-".repeat(46));
+    for d in 0..deepest {
+        let sp = Spread::of(
+            runs.iter()
+                .filter_map(|(_, c)| c.layers.get(d).map(|l| l.churn)),
+        );
+        let _ = writeln!(s, "{:>5}  {:>6}  {:<30}", d + 1, sp.n, spread_cell(&sp, 5));
+    }
+    let falls = runs.iter().filter(|(_, c)| churn_falls(c)).count();
+    let calmer = runs
+        .iter()
+        .filter(|(_, c)| match (c.layers.first(), c.layers.last()) {
+            (Some(a), Some(b)) => c.layers.len() > 1 && b.churn < a.churn,
+            _ => false,
+        })
+        .count();
+    let ratio =
+        Spread::of(
+            runs.iter()
+                .filter_map(|(_, c)| match (c.layers.first(), c.layers.last()) {
+                    (Some(a), Some(b)) if c.layers.len() > 1 && b.churn > 0.0 => {
+                        Some(a.churn / b.churn)
+                    }
+                    _ => None,
+                }),
+        );
+    let _ = writeln!(
+        s,
+        "\nthe deepest layer was calmer than the root in {calmer}/{n} seeds, by {}x",
+        spread_cell(&ratio, 2)
+    );
+    let _ = writeln!(
+        s,
+        "churn fell at every step down the chain in {falls}/{n} seeds"
+    );
+    s.push_str(ENSEMBLE_CLOSER);
+    s
+}
+
+pub fn write_chain_ensemble(runs: &[(u64, Chain)], out_dir: &Path) -> io::Result<PathBuf> {
+    let mut csv = String::from("seed,depth,width,height,budget_work,spent_work,churn,sterile\n");
+    for (seed, c) in runs {
+        for l in &c.layers {
+            let _ = writeln!(
+                csv,
+                "{seed},{},{},{},{},{},{:.6},{}",
+                l.layer.depth,
+                l.layer.spec.width,
+                l.layer.spec.height,
+                l.layer.budget.work,
+                l.work.neighbor_visits,
+                l.churn,
+                l.sterile
+            );
+        }
+    }
+    write_rows(out_dir, csv)
+}
+
+pub fn pipe_ensemble_summary(runs: &[(u64, Relay)]) -> String {
+    let mut s = String::new();
+    let seeds: Vec<u64> = runs.iter().map(|(s, _)| *s).collect();
+    ensemble_header(&mut s, &seeds);
+    let _ = writeln!(
+        s,
+        "content avalanche:     {}",
+        spread_cell(
+            &Spread::of(runs.iter().map(|(_, r)| r.content_avalanche)),
+            3
+        )
+    );
+    let _ = writeln!(
+        s,
+        "magnitude correlation: {}",
+        spread_cell(
+            &Spread::of(runs.iter().map(|(_, r)| r.magnitude_correlation())),
+            3
+        )
+    );
+    let _ = writeln!(
+        s,
+        "narrowest width keeping 90% of the full correlation: {}",
+        spread_cell(
+            &Spread::of(
+                runs.iter()
+                    .map(|(_, r)| r.width_for(0.9).map_or(f64::NAN, f64::from))
+            ),
+            1
+        )
+    );
+    let _ = writeln!(s, "\n{:>6}  {:<30}", "bits", "correlation: mean [min, max]");
+    let _ = writeln!(s, "{}", "-".repeat(40));
+    for (i, &bits) in pipe::WIDTHS.iter().enumerate() {
+        let sp = Spread::of(
+            runs.iter()
+                .map(|(_, r)| r.width_sweep().get(i).map_or(f64::NAN, |w| w.correlation)),
+        );
+        let _ = writeln!(s, "{:>6}  {:<30}", bits, spread_cell(&sp, 3));
+    }
+    let _ = writeln!(
+        s,
+        "\n{:>10}  {:<28}",
+        "threshold", "registers: mean [min, max]"
+    );
+    let _ = writeln!(s, "{}", "-".repeat(40));
+    for &t in pipe::THRESHOLDS {
+        let sp = Spread::of(runs.iter().map(|(_, r)| r.visible_fraction(t)));
+        let _ = writeln!(s, "{:>10.2}  {:<28}", t, spread_cell(&sp, 3));
+    }
+    s.push_str(ENSEMBLE_CLOSER);
+    s
+}
+
+pub fn write_pipe_ensemble(runs: &[(u64, Relay)], out_dir: &Path) -> io::Result<PathBuf> {
+    let mut csv = String::from("seed,content_avalanche,magnitude_correlation,width_for_90\n");
+    for (seed, r) in runs {
+        let _ = writeln!(
+            csv,
+            "{seed},{:.6},{:.6},{}",
+            r.content_avalanche,
+            r.magnitude_correlation(),
+            r.width_for(0.9)
+                .map_or("NaN".to_string(), |b| b.to_string())
+        );
+    }
+    write_rows(out_dir, csv)
+}
+
+pub fn detect_ensemble_summary(runs: &[(u64, Vec<Finding>)]) -> String {
+    let mut s = String::new();
+    let seeds: Vec<u64> = runs.iter().map(|(s, _)| *s).collect();
+    let n = runs.len();
+    ensemble_header(&mut s, &seeds);
+    let rendering = |fs: &Vec<Finding>| -> Vec<Finding> {
+        fs.iter()
+            .filter(|f| f.gaze == crate::detector::Gaze::Rendering)
+            .cloned()
+            .collect()
+    };
+    let isos: Vec<crate::detector::Isotropy> = runs
+        .iter()
+        .filter_map(|(_, fs)| crate::detector::isotropy(&rendering(fs)))
+        .collect();
+    let _ = writeln!(
+        s,
+        "lattice shape found in {}/{n} seeds, anisotropy {}; scale given away in {}/{n}",
+        isos.iter().filter(|i| i.found).count(),
+        spread_cell(&Spread::of(isos.iter().map(|i| i.lattice)), 4),
+        isos.iter().filter(|i| i.separates_scale).count()
+    );
+    let _ = writeln!(
+        s,
+        "\n{:<24} {:<16} {:<15} {:>7}  {:<24} {:<24}",
+        "gaze", "limit", "signal", "found", "with: mean [min, max]", "without: mean [min, max]"
+    );
+    let _ = writeln!(s, "{}", "-".repeat(116));
+    let Some((_, first)) = runs.first() else {
+        return s;
+    };
+    for (i, f) in first.iter().enumerate() {
+        let at = |r: &Vec<Finding>| r.get(i).cloned();
+        let found = runs
+            .iter()
+            .filter(|(_, r)| at(r).is_some_and(|g| g.detectable))
+            .count();
+        let with = Spread::of(runs.iter().filter_map(|(_, r)| at(r).map(|g| g.with_value)));
+        let without = Spread::of(
+            runs.iter()
+                .filter_map(|(_, r)| at(r).map(|g| g.without_value)),
+        );
+        let _ = writeln!(
+            s,
+            "{:<24} {:<16} {:<15} {:>7}  {:<24} {:<24}",
+            f.gaze.label(),
+            f.limit,
+            f.signal,
+            format!("{found}/{n}"),
+            spread_cell(&with, 4),
+            spread_cell(&without, 4)
+        );
+    }
+    s.push_str(ENSEMBLE_CLOSER);
+    s
+}
+
+pub fn write_detect_ensemble(runs: &[(u64, Vec<Finding>)], out_dir: &Path) -> io::Result<PathBuf> {
+    let mut csv = String::from(
+        "seed,gaze,limit,signal,with_limit,without_limit,detectable,anisotropy_with,anisotropy_without\n",
+    );
+    for (seed, fs) in runs {
+        for f in fs {
+            let _ = writeln!(
+                csv,
+                "{seed},{},{},{},{:.6},{:.6},{},{:.6},{:.6}",
+                f.gaze.label(),
+                f.limit,
+                f.signal,
+                f.with_value,
+                f.without_value,
+                f.detectable,
+                f.with.anisotropy(),
+                f.without.anisotropy()
+            );
+        }
+    }
+    write_rows(out_dir, csv)
+}
+
+pub fn sweep_ensemble_summary(runs: &[(u64, Sweep)]) -> String {
+    let mut s = String::new();
+    let seeds: Vec<u64> = runs.iter().map(|(s, _)| *s).collect();
+    let n = runs.len();
+    ensemble_header(&mut s, &seeds);
+    let admitted = runs
+        .iter()
+        .filter(|(_, sw)| sw.reference_is_admitted())
+        .count();
+    let _ = writeln!(
+        s,
+        "productive share of distinct laws: {}",
+        spread_cell(
+            &Spread::of(runs.iter().map(|(_, sw)| sw.productive_rule_fraction())),
+            3
+        )
+    );
+    let _ = writeln!(
+        s,
+        "productive laws:                   {}",
+        spread_cell(
+            &Spread::of(runs.iter().map(|(_, sw)| sw.distinct_complex() as f64)),
+            1
+        )
+    );
+    let _ = writeln!(
+        s,
+        "distinct laws reachable:           {}",
+        spread_cell(
+            &Spread::of(runs.iter().map(|(_, sw)| sw.distinct_rules() as f64)),
+            1
+        )
+    );
+    let _ = writeln!(s, "Conway passed its own bar in {admitted}/{n} seeds");
+    s.push_str(ENSEMBLE_CLOSER);
+    s
+}
+
+pub fn write_sweep_ensemble(runs: &[(u64, Sweep)], out_dir: &Path) -> io::Result<PathBuf> {
+    let mut csv = String::from(
+        "seed,distinct_rules,distinct_complex,productive_rule_fraction,productive_fraction,reference_admitted\n",
+    );
+    for (seed, sw) in runs {
+        let _ = writeln!(
+            csv,
+            "{seed},{},{},{:.6},{:.6},{}",
+            sw.distinct_rules(),
+            sw.distinct_complex(),
+            sw.productive_rule_fraction(),
+            sw.productive_fraction(),
+            sw.reference_is_admitted()
+        );
+    }
+    write_rows(out_dir, csv)
+}
+
+// ---------------------------------------------------------------------------
+// Theory 6: sensitivity to the criterion
+// ---------------------------------------------------------------------------
+
+fn pct(v: f64) -> String {
+    format!("{:.1}%", v * 100.0)
+}
+
+pub fn sensitivity_summary(sens: &Sensitivity) -> String {
+    let mut s = String::new();
+    let _ = writeln!(
+        s,
+        "fine-tuning under three criteria, over every distinct law reachable by sweeping\n\
+         both band centres and both half-widths: {} laws, {} of them at Conway's widths\n",
+        sens.law_count(false),
+        sens.law_count(true)
+    );
+    let _ = writeln!(
+        s,
+        "{:<22} {:>14} {:>18} {:>18}",
+        "criterion", "conway passes", "conway's widths", "all four constants"
+    );
+    let _ = writeln!(s, "{}", "-".repeat(75));
+    for (i, c) in sens.criteria.iter().enumerate() {
+        let _ = writeln!(
+            s,
+            "{:<22} {:>14} {:>18} {:>18}",
+            c.label(),
+            if c.admits(&sens.conway) { "yes" } else { "no" },
+            pct(sens.fraction(i, true)),
+            pct(sens.fraction(i, false))
+        );
+    }
+    let (lo, hi) = sens.range();
+    let _ = writeln!(
+        s,
+        "\nproductive share of distinct laws, across criteria: {} to {}",
+        pct(lo),
+        pct(hi)
+    );
+    s.push_str(
+        "\nonly the first criterion looks at Conway. the other two have bands fixed in advance,\n\
+         which is a choice too: every criterion here encodes a guess about what complexity is.\n\
+         the spread between them is the honest size of the answer.\n",
+    );
+    s
+}
+
+pub fn write_sensitivity(sens: &Sensitivity, out_dir: &Path) -> io::Result<Written> {
+    std::fs::create_dir_all(out_dir)?;
+    let mut csv = String::from(
+        "signature,conway_widths,final_live,activity,dispersion,compressibility,growth",
+    );
+    for c in &sens.criteria {
+        let _ = write!(csv, ",{}", c.label().replace(' ', "_"));
+    }
+    csv.push('\n');
+    for (sig, fixed, p) in &sens.laws {
+        let _ = write!(
+            csv,
+            "{sig},{fixed},{:.6},{:.8},{:.6},{:.6},{:.6}",
+            p.final_live, p.activity, p.dispersion, p.compressibility, p.growth
+        );
+        for c in &sens.criteria {
+            let _ = write!(csv, ",{}", c.admits(p));
+        }
+        csv.push('\n');
+    }
+
+    let mut json = String::from("{\n");
+    let _ = writeln!(
+        json,
+        "  \"laws\": {}, \"laws_at_conway_widths\": {},",
+        sens.law_count(false),
+        sens.law_count(true)
+    );
+    let (lo, hi) = sens.range();
+    let _ = writeln!(json, "  \"range\": [{}, {}],", json_f64(lo), json_f64(hi));
+    json.push_str("  \"criteria\": [\n");
+    for (i, c) in sens.criteria.iter().enumerate() {
+        let _ = write!(
+            json,
+            "    {{\"criterion\": \"{}\", \"conway_admitted\": {}, \"at_conway_widths\": {}, \
+             \"all_constants\": {}}}",
+            c.label(),
+            c.admits(&sens.conway),
+            json_f64(sens.fraction(i, true)),
+            json_f64(sens.fraction(i, false))
+        );
+        if i + 1 < sens.criteria.len() {
+            json.push(',');
+        }
+        json.push('\n');
+    }
+    json.push_str("  ]\n}\n");
+
+    let csv_path = out_dir.join("sensitivity.csv");
+    let json_path = out_dir.join("sensitivity.json");
+    std::fs::write(&csv_path, csv)?;
+    std::fs::write(&json_path, json)?;
+    Ok(Written {
+        csv: csv_path,
+        json: json_path,
+    })
+}
+
+pub fn sensitivity_ensemble_summary(runs: &[(u64, Sensitivity)]) -> String {
+    let mut s = String::new();
+    let seeds: Vec<u64> = runs.iter().map(|(s, _)| *s).collect();
+    let n = runs.len();
+    ensemble_header(&mut s, &seeds);
+    let Some((_, first)) = runs.first() else {
+        return s;
+    };
+    let _ = writeln!(
+        s,
+        "\n{:<22} {:>9}  {:<24} {:<24}",
+        "criterion", "conway", "conway's widths", "all four constants"
+    );
+    let _ = writeln!(s, "{}", "-".repeat(82));
+    for (i, c) in first.criteria.iter().enumerate() {
+        let passes = runs
+            .iter()
+            .filter(|(_, x)| x.criteria[i].admits(&x.conway))
+            .count();
+        let fixed = Spread::of(runs.iter().map(|(_, x)| x.fraction(i, true)));
+        let all = Spread::of(runs.iter().map(|(_, x)| x.fraction(i, false)));
+        let _ = writeln!(
+            s,
+            "{:<22} {:>9}  {:<24} {:<24}",
+            c.label(),
+            format!("{passes}/{n}"),
+            spread_cell(&fixed, 3),
+            spread_cell(&all, 3)
+        );
+    }
+    let lows = Spread::of(runs.iter().map(|(_, x)| x.range().0));
+    let highs = Spread::of(runs.iter().map(|(_, x)| x.range().1));
+    let _ = writeln!(
+        s,
+        "\nlowest criterion per seed:  {}\nhighest criterion per seed: {}",
+        spread_cell(&lows, 3),
+        spread_cell(&highs, 3)
+    );
+    s.push_str(ENSEMBLE_CLOSER);
+    s
+}
+
+pub fn write_sensitivity_ensemble(
+    runs: &[(u64, Sensitivity)],
+    out_dir: &Path,
+) -> io::Result<PathBuf> {
+    std::fs::create_dir_all(out_dir)?;
+    let mut csv = String::from("seed,criterion,conway_admitted,at_conway_widths,all_constants\n");
+    for (seed, x) in runs {
+        for (i, c) in x.criteria.iter().enumerate() {
+            let _ = writeln!(
+                csv,
+                "{seed},{},{},{:.6},{:.6}",
+                c.label(),
+                c.admits(&x.conway),
+                x.fraction(i, true),
+                x.fraction(i, false)
+            );
+        }
+    }
+    let path = out_dir.join("sensitivity_ensemble.csv");
+    std::fs::write(&path, csv)?;
+    Ok(path)
+}
+
+pub fn boot_ensemble_summary(runs: &[(u64, BootChain)]) -> String {
+    let mut s = String::new();
+    let seeds: Vec<u64> = runs.iter().map(|(s, _)| *s).collect();
+    let n = runs.len();
+    ensemble_header(&mut s, &seeds);
+    let _ = writeln!(
+        s,
+        "depth reached: {}",
+        spread_cell(&Spread::of(runs.iter().map(|(_, c)| c.depth() as f64)), 2)
+    );
+    let deepest = runs.iter().map(|(_, c)| c.layers.len()).max().unwrap_or(0);
+    let _ = writeln!(
+        s,
+        "\n{:>5}  {:>6}  {:<26} {:<26}",
+        "depth", "seeds", "boots: mean [min, max]", "edge: mean [min, max]"
+    );
+    let _ = writeln!(s, "{}", "-".repeat(68));
+    for d in 0..deepest {
+        let layers: Vec<&BootLayer> = runs.iter().filter_map(|(_, c)| c.layers.get(d)).collect();
+        let boots = Spread::of(layers.iter().map(|l| l.survey.bootloaders as f64));
+        let edge = Spread::of(layers.iter().map(|l| l.spec.width as f64));
+        let _ = writeln!(
+            s,
+            "{:>5}  {:>6}  {:<26} {:<26}",
+            d + 1,
+            layers.len(),
+            spread_cell(&boots, 1),
+            spread_cell(&edge, 1)
+        );
+    }
+    let thinning = runs
+        .iter()
+        .filter(|(_, c)| {
+            c.layers
+                .windows(2)
+                .all(|w| w[1].survey.bootloaders <= w[0].survey.bootloaders)
+        })
+        .count();
+    let _ = writeln!(
+        s,
+        "\nbootloaders never rose down the chain in {thinning}/{n} seeds"
+    );
+    let mut reasons: Vec<(&str, usize)> = Vec::new();
+    for (_, c) in runs {
+        match reasons.iter_mut().find(|(r, _)| *r == c.ended_because) {
+            Some((_, k)) => *k += 1,
+            None => reasons.push((c.ended_because, 1)),
+        }
+    }
+    s.push_str("why the chain ended:\n");
+    for (r, k) in reasons {
+        let _ = writeln!(s, "  {k:>3}/{n}  {r}");
+    }
+    s.push_str(ENSEMBLE_CLOSER);
+    s
+}
+
+/// What removing the bootloader gate changed, for one seed.
+///
+/// The child's seed is hashed from what crossed the horizon and nothing else,
+/// so the gate is the only way bootloaders reach the next layer. If the two
+/// chains build the same layers, the gate never fired and bootloaders changed
+/// nothing; if the ungated one runs on past a layer, the gate is what stopped
+/// it, and still nothing about the layers it shares was decided by life.
+pub fn gate_ablation(gated: &BootChain, ungated: &BootChain) -> String {
+    let mut s = String::new();
+    let _ = writeln!(
+        s,
+        "ablation: the same chain with the bootloader gate removed\n\n\
+         {:<10} {:>6}  ended because",
+        "", "depth"
+    );
+    for c in [gated, ungated] {
+        let _ = writeln!(
+            s,
+            "{:<10} {:>6}  {}",
+            c.gate.label(),
+            c.depth(),
+            c.ended_because
+        );
+    }
+    s.push('\n');
+    let fired_at = gated
+        .layers
+        .iter()
+        .find(|l| !l.survey.can_boot())
+        .map(|l| l.depth);
+    if gated.same_layers(ungated) {
+        match fired_at {
+            None => s.push_str(
+                "the two chains are identical: every layer had a bootloader, so the gate never\n\
+                 fired, and bootloaders changed nothing the next layer received.\n",
+            ),
+            Some(d) => {
+                let _ = writeln!(
+                    s,
+                    "the two chains are identical: the gate fired at depth {d}, but no smaller world\n\
+                     was viable, so the chain would have stopped there anyway."
+                );
+            }
+        }
+    } else if gated.is_prefix_of(ungated) {
+        let _ = writeln!(
+            s,
+            "the ungated chain built the same {} layers and then {} more: the gate is what\n\
+             stopped it. bootloaders decide whether a child exists, never what it is.",
+            gated.depth(),
+            ungated.depth() - gated.depth()
+        );
+    } else {
+        s.push_str(
+            "the two chains differ in layers they share: bootloaders shaped what a child\n\
+             received, not only whether it existed.\n",
+        );
+    }
+    s
+}
+
+/// The ablation across an ensemble.
+pub fn gate_ensemble_summary(runs: &[(u64, (BootChain, BootChain))]) -> String {
+    let mut s = String::new();
+    let n = runs.len();
+    let identical = runs.iter().filter(|(_, (g, u))| g.same_layers(u)).count();
+    let extended = runs
+        .iter()
+        .filter(|(_, (g, u))| !g.same_layers(u) && g.is_prefix_of(u))
+        .count();
+    let other = n - identical - extended;
+    let fired = runs
+        .iter()
+        .filter(|(_, (g, _))| g.layers.iter().any(|l| !l.survey.can_boot()))
+        .count();
+    let _ = writeln!(
+        s,
+        "gate ablation over {n} seeds: identical chains {identical}/{n}, ungated ran on \
+         {extended}/{n}, differed in shared layers {other}/{n}"
+    );
+    let _ = writeln!(
+        s,
+        "the gate fired in {fired}/{n} seeds and was the only thing stopping the chain in {extended}/{n}"
+    );
+    let _ = writeln!(
+        s,
+        "depth gated {}, ungated {}",
+        spread_cell(
+            &Spread::of(runs.iter().map(|(_, (g, _))| g.depth() as f64)),
+            2
+        ),
+        spread_cell(
+            &Spread::of(runs.iter().map(|(_, (_, u))| u.depth() as f64)),
+            2
+        )
+    );
+    s
+}
+
+/// The ablation across an ensemble, one row per seed.
+pub fn write_gate_ensemble(
+    runs: &[(u64, (BootChain, BootChain))],
+    out_dir: &Path,
+) -> io::Result<PathBuf> {
+    std::fs::create_dir_all(out_dir)?;
+    let mut csv = String::from("seed,gated_depth,ungated_depth,gate_fired,identical,prefix\n");
+    for (seed, (g, u)) in runs {
+        let _ = writeln!(
+            csv,
+            "{seed},{},{},{},{},{}",
+            g.depth(),
+            u.depth(),
+            g.layers.iter().any(|l| !l.survey.can_boot()),
+            g.same_layers(u),
+            g.is_prefix_of(u)
+        );
+    }
+    let path = out_dir.join("gate.csv");
+    std::fs::write(&path, csv)?;
+    Ok(path)
+}
+
+/// One chain's ablation as a JSON object.
+pub fn gate_json(gated: &BootChain, ungated: &BootChain) -> String {
+    format!(
+        "{{\"gated_depth\": {}, \"ungated_depth\": {}, \"identical\": {}, \
+         \"ungated_extends_gated\": {}, \"ungated_ended_because\": \"{}\"}}",
+        gated.depth(),
+        ungated.depth(),
+        gated.same_layers(ungated),
+        gated.is_prefix_of(ungated),
+        ungated.ended_because
+    )
+}
+
+pub fn write_gate(gated: &BootChain, ungated: &BootChain, out_dir: &Path) -> io::Result<PathBuf> {
+    std::fs::create_dir_all(out_dir)?;
+    let path = out_dir.join("ablation.json");
+    std::fs::write(&path, gate_json(gated, ungated) + "\n")?;
+    Ok(path)
+}
+
+pub fn write_boot_ensemble(runs: &[(u64, BootChain)], out_dir: &Path) -> io::Result<PathBuf> {
+    let mut csv = String::from(
+        "seed,depth,width,height,layer_seed,bootloaders,transport,crossed,booted_child,ended_because\n",
+    );
+    for (seed, c) in runs {
+        for l in &c.layers {
+            let _ = writeln!(
+                csv,
+                "{seed},{},{},{},{},{},{:.3},{},{},\"{}\"",
+                l.depth,
+                l.spec.width,
+                l.spec.height,
+                l.seed,
+                l.survey.bootloaders,
+                l.survey.transport + 0.0,
+                l.crossed,
+                l.booted_child,
+                c.ended_because
+            );
+        }
+    }
+    write_rows(out_dir, csv)
+}
+
+// ---------------------------------------------------------------------------
+// Where a chain dies
+// ---------------------------------------------------------------------------
+
+const ENDINGS: &[Ending] = &[
+    Ending::Budget,
+    Ending::Space,
+    Ending::Threshold,
+    Ending::Sterile,
+    Ending::Tied,
+];
+
+fn edge_grid(cells: &[EdgeCell], glyph: impl Fn(&EdgeCell) -> char) -> String {
+    let mut s = String::new();
+    let _ = write!(s, "{:>12} ", "floor\\frac");
+    for f in crate::bootloader::EDGE_FRACTIONS {
+        let _ = write!(s, "{:>5.2}", f);
+    }
+    s.push('\n');
+    for &edge in crate::bootloader::EDGE_FLOORS {
+        let _ = write!(s, "{:>12} ", format!("edge {edge}"));
+        for &f in crate::bootloader::EDGE_FRACTIONS {
+            let c = cells
+                .iter()
+                .find(|c| c.viable_edge == edge && c.fraction == f)
+                .map_or('?', &glyph);
+            let _ = write!(s, "{:>5}", c);
+        }
+        s.push('\n');
+    }
+    s
+}
+
+fn edge_legend() -> String {
+    let parts: Vec<String> = ENDINGS
+        .iter()
+        .map(|e| format!("{} {}", e.glyph(), e.label()))
+        .collect();
+    format!("  {}\n", parts.join("   "))
+}
+
+pub fn edge_summary(cells: &[EdgeCell]) -> String {
+    let mut s = String::from(
+        "why each chain stopped, by degradation fraction (columns) and smallest viable\n\
+         world edge (rows). sterility counts only where the gate alone stopped the chain.\n\n",
+    );
+    s.push_str(&edge_grid(cells, |c| c.ending.glyph()));
+    s.push('\n');
+    s.push_str(&edge_legend());
+    s.push('\n');
+    for e in ENDINGS {
+        let k = cells.iter().filter(|c| c.ending == *e).count();
+        if k > 0 {
+            let _ = writeln!(s, "{:>3}/{}  {}", k, cells.len(), e.label());
+        }
+    }
+    s
+}
+
+pub fn write_edge(runs: &[(u64, Vec<EdgeCell>)], out_dir: &Path) -> io::Result<PathBuf> {
+    std::fs::create_dir_all(out_dir)?;
+    let mut csv = String::from("seed,fraction,viable_edge,gated_depth,ungated_depth,ending\n");
+    for (seed, cells) in runs {
+        for c in cells {
+            let _ = writeln!(
+                csv,
+                "{seed},{:.2},{},{},{},{}",
+                c.fraction,
+                c.viable_edge,
+                c.gated_depth,
+                c.ungated_depth,
+                c.ending.code()
+            );
+        }
+    }
+    let path = out_dir.join("edge.csv");
+    std::fs::write(&path, csv)?;
+    Ok(path)
+}
+
+/// Across seeds: the commonest ending in each cell, and how often sterility
+/// alone was binding there.
+pub fn edge_ensemble_summary(runs: &[(u64, Vec<EdgeCell>)]) -> String {
+    let mut s = String::new();
+    let seeds: Vec<u64> = runs.iter().map(|(s, _)| *s).collect();
+    let n = runs.len();
+    ensemble_header(&mut s, &seeds);
+    let Some((_, first)) = runs.first() else {
+        return s;
+    };
+    let at = |i: usize| runs.iter().filter_map(move |(_, cells)| cells.get(i));
+    let commonest: Vec<EdgeCell> = first
+        .iter()
+        .enumerate()
+        .map(|(i, c)| {
+            let best = ENDINGS
+                .iter()
+                .max_by_key(|e| {
+                    (
+                        at(i).filter(|x| x.ending == **e).count(),
+                        std::cmp::Reverse(**e),
+                    )
+                })
+                .copied()
+                .unwrap_or(c.ending);
+            EdgeCell { ending: best, ..*c }
+        })
+        .collect();
+    s.push_str("\ncommonest ending in each cell:\n\n");
+    s.push_str(&edge_grid(&commonest, |c| c.ending.glyph()));
+    s.push('\n');
+    s.push_str(&edge_legend());
+
+    let sterile_share: Vec<EdgeCell> = first.to_vec();
+    s.push_str(
+        "\nseeds in which sterility alone stopped the chain, in tenths (0-9, + for all):\n\n",
+    );
+    let idx = |c: &EdgeCell| first.iter().position(|x| x == c).unwrap_or(0);
+    s.push_str(&edge_grid(&sterile_share, |c| {
+        let k = at(idx(c)).filter(|x| x.ending == Ending::Sterile).count();
+        if k == n {
+            '+'
+        } else {
+            char::from_digit((k * 10 / n.max(1)) as u32, 10).unwrap_or('?')
+        }
+    }));
+    let any = (0..first.len())
+        .filter(|&i| at(i).any(|x| x.ending == Ending::Sterile))
+        .count();
+    let _ = writeln!(
+        s,
+        "\nsterility alone stopped the chain somewhere in {any}/{} cells, in at least one seed",
+        first.len()
+    );
+    s.push_str(ENSEMBLE_CLOSER);
+    s
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1248,13 +2438,19 @@ mod tests {
     use crate::physics::Rules;
 
     fn exp() -> Experiment {
-        let cfg = Config {
+        run_all(&cfg(), |_| {})
+    }
+
+    fn cfg() -> Config {
+        Config {
             world: WorldCfg {
                 width: 32,
                 height: 32,
                 ticks: 6,
                 seed: 5,
                 init_density: 0.3,
+                seeds: 1,
+                seed_stride: 1000,
             },
             rules: Rules::default(),
             constraints: Constraints::ALL_ON,
@@ -1271,8 +2467,7 @@ mod tests {
             },
             nesting: Degradation::default(),
             horizon: crate::pipe::Horizon::default(),
-        };
-        run_all(&cfg, |_| {})
+        }
     }
 
     #[test]
@@ -1317,12 +2512,14 @@ mod tests {
     #[test]
     fn pipe_csv_is_rectangular() {
         let relay = Relay {
-            horizon: Horizon::default(),
+            horizon: crate::pipe::Horizon::default(),
             received: crate::pipe::WriteEnd::new().seal(),
             child_truth: vec![0.1, 0.2, 0.3],
             content_avalanche: 0.5,
+            by_width: Vec::new(),
         };
         assert_rectangular(&pipe_to_csv(&relay), PIPE_COLUMNS.len());
+        assert_rectangular(&widths_to_csv(&relay), 3);
     }
 
     #[test]
@@ -1362,6 +2559,43 @@ mod tests {
     fn the_summary_refuses_to_overclaim() {
         let s = summary(&exp());
         assert!(s.contains("says nothing about whether our universe works this way"));
+        assert!(
+            s.contains("follow from the rules by arithmetic"),
+            "the summary must say which columns were never in doubt"
+        );
+    }
+
+    #[test]
+    fn the_ensemble_summary_refuses_to_overclaim_and_omits_wall_time() {
+        let mut c = cfg();
+        c.world.seeds = 3;
+        let ens = crate::experiment::run_ensemble(&c, |_| {});
+        let s = ensemble_summary(&ens);
+        assert!(s.contains("says nothing about whether our universe works this way"));
+        assert!(s.contains("follow from the rules by arithmetic"));
+        assert!(s.contains("3 seeds"));
+        assert!(
+            !s.contains(" ms"),
+            "parallel members have no honest wall time"
+        );
+        let json = ensemble_to_json(&ens);
+        assert_eq!(
+            json.chars().filter(|c| *c == '{').count(),
+            json.chars().filter(|c| *c == '}').count()
+        );
+        let csv = ensemble_to_csv(&ens);
+        assert_eq!(
+            csv.lines().count(),
+            1 + 3 * 5,
+            "a header, then a row per seed per limit"
+        );
+    }
+
+    #[test]
+    fn spread_cells_and_json_handle_an_empty_spread() {
+        let empty = Spread::of(std::iter::empty());
+        assert_eq!(spread_cell(&empty, 3), "n/a");
+        assert!(spread_json(&empty).contains("null"));
     }
 
     #[test]
