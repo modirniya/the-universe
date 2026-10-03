@@ -1,10 +1,17 @@
-//! Theory 3: black holes as serializing pipes. Theory 4's measurable half.
+//! Theory 3: the horizon as a serializing pipe. Theory 4's measurable half.
 //!
 //! A **pipe** is a one-way channel between layers. What goes in does not come
 //! back, and what comes out bears no resemblance to what went in — which is the
 //! behaviour of a serializing write, not of a door. The **horizon** is the
 //! write surface: a region of the child universe whose contents are folded into
 //! a single message each tick.
+//!
+//! The framework's inspiration for this is the information-loss behaviour
+//! associated with black holes. Nothing here models one: the universe has no
+//! gravity, no horizon in the physical sense and no singularity, and the word
+//! "horizon" names a rectangle of cells. The analogy is a physical hypothesis
+//! and lives in `docs/philosophy.md`; this module is a channel abstraction and
+//! is measured as one, in [`crate::information`].
 //!
 //! # What is designed in, and what is measured
 //!

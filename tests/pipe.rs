@@ -187,17 +187,15 @@ fn one_bit_carries_nothing_at_these_occupancies() {
 }
 
 #[test]
-fn narrowing_the_channel_is_not_monotone_at_the_bottom() {
-    // Pinned so the README cannot quietly claim otherwise: at seed 42 three
-    // bits track the child worse than two. Coarse quantisation can cost more
-    // than one extra level gains.
+fn the_width_curve_is_a_result_and_is_not_assumed_monotone() {
+    // v0.9 pinned "three bits track the child worse than two at seed 42". That
+    // was a fact about one seed and one horizon placement, and it stopped being
+    // true when the horizon was moved to where the config said it was. What is
+    // invariant: every row is a correlation in [-1, 1] or NaN, and the widest
+    // row is the pipe's own. Whether the curve dips is read from the artifacts.
     let r = relay(&cfg());
-    let at = |b: u32| {
-        r.width_sweep()
-            .into_iter()
-            .find(|w| w.bits == b)
-            .unwrap()
-            .correlation
-    };
-    assert!(at(3) < at(2));
+    for w in r.width_sweep() {
+        assert!(w.correlation.is_nan() || (-1.0..=1.0).contains(&w.correlation));
+        assert!(w.levels_seen >= 1);
+    }
 }

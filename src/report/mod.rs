@@ -21,6 +21,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 pub mod detect;
+pub mod information;
 pub mod limits;
 
 /// Files written by one experiment.

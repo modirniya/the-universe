@@ -1,8 +1,10 @@
-# Theory 3: black holes as serializing pipes.
+# Theory 3: the horizon as a serializing pipe.
 #
 # A child universe writes one message per tick through its horizon. The
-# question is what a parent on the far side can recover: the arrangement, or
-# only the amount and the moment.
+# question is what a parent on the far side can recover, and for which task:
+# the amount, the moment, the arrangement, the future. The analysis measures
+# it in bits, per encoding, against a window elsewhere and against noise.
+# Nothing here models a black hole; see docs/philosophy.md for the analogy.
 
 [world]
 width = 128
@@ -27,12 +29,13 @@ y = 32
 width = 64
 height = 64
 
-# The write surface. Placed to straddle the observed region and the coarse
-# ground outside it, because what crosses a pipe is subject to the child's own
-# optimizations and pretending otherwise would flatter the model.
+# The write surface. Placed to straddle the observed region (32..96) and the
+# coarse ground outside it, because what crosses a pipe is subject to the
+# child's own optimizations and pretending otherwise would flatter the model.
+# (v0.9 placed it at 48, wholly inside the observed region, while saying this.)
 [horizon]
-x = 48
-y = 48
+x = 64
+y = 64
 width = 48
 height = 48
 bits = 128   # channel width per tick: an exact magnitude plus a 64-bit digest.

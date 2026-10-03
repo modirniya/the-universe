@@ -206,6 +206,18 @@ produce. The README classifies this as "follows from rules". Agreed — but it
 is then listed under "found" in the detection table as if the detector
 established something.
 
+### 2.5 The inhabitant did not scale with the lattice
+
+`Inhabitant::cells` placed the inhabitant's window in *fine* cells while the
+probe is placed in base cells. In a universe with `discrete_space` relaxed
+(two fine cells per base cell) the inhabitant therefore covered a different
+and smaller physical region than the same inhabitant in the coarse universe —
+one lying wholly inside the observed ground, where there is no coarse ground
+to read. Found during the redesign, when the new hypothesis test reported the
+passive gaze "detecting" discrete space through smoothness with power 20/20:
+the two universes being compared were being read in two different places.
+Fixed in v1.0; the inhabitant is now placed in base cells like the probe.
+
 ## 3. Theory 3 — the pipe (`pipe`)
 
 ### 3.1 Correlation of a slowly varying scalar with itself
@@ -346,7 +358,8 @@ Correctly labelled already. The ablation confirms the code does what it says.
 | 1.5 | No factorial, one metric | Full 2⁴ factorial; six observables; cost–fidelity table and Pareto set. |
 | 2.1 | Hard-coded `min_feature` | Removed from `Evidence`; the claim is a definition in the ledger. |
 | 2.2 | √2 is geometry | Reclassified as a consequence; the measured part (births reach the corner) is stated as such. |
-| 2.3 | Ad hoc verdicts | `detector::test`: calibration seeds set a threshold at a stated false-positive rate, evaluation seeds measure power; negative control of two unconstrained universes. |
+| 2.3 | Ad hoc verdicts | `detector::survey`: calibration seeds set a threshold at a stated false-positive rate, evaluation seeds measure power; negative control of two all-limits universes; resample control for lazy rendering. |
+| 2.5 | Inhabitant in fine cells | Placed in base cells, like the probe. |
 | 3.1 | Correlation only | `pipe::information`: mutual information with a shuffle null, five tasks, four encodings, and a same-bits control through a plain quantiser of a random window. |
 | 3.2 | Horizon inside the observed region | Config fixed and the comment corrected. |
 | 3.3 | Black-hole naming | Renamed to the horizon/pipe abstraction throughout; the analogy stays in `docs/philosophy.md` as a physical hypothesis. |

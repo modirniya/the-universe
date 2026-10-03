@@ -8,7 +8,7 @@ use universe_core::bootloader::{self, Gate};
 use universe_core::budget::Budget;
 use universe_core::config::Config;
 use universe_core::detector::{self, Inhabitant};
-use universe_core::{experiment, layer, limits, pipe, report, sweep};
+use universe_core::{experiment, information, layer, limits, pipe, report, sweep};
 
 const USAGE: &str = "\
 the-universe — a runnable model of a simulation-hypothesis framework
@@ -33,9 +33,9 @@ COMMANDS:
             afford another. (Theory 2: nesting and degradation.)
 
     pipe    Transmit a universe through a one-way serializing channel and
-            report what survived: whether the arrangement did, whether the
-            timing and magnitude did, and what a parent sees at each logging
-            threshold. (Theory 3: black holes as pipes.)
+            report what survived, in bits: per task, per encoding, against a
+            window elsewhere and against noise. (Theory 3: the horizon as a
+            pipe.)
 
     detect  Measure a universe from inside it, with no access to its config,
             and test which limits an inhabitant can find: rules calibrated on
@@ -496,6 +496,24 @@ fn execute_pipe(cfg: &Config, out_dir: &Path) -> Result<(), Box<dyn std::error::
         print_ensemble(
             report::pipe_ensemble_summary(&runs),
             report::write_pipe_ensemble(&runs, out_dir),
+        )?;
+    }
+
+    // What crossed, in bits: per task, per encoding, against the controls.
+    println!("\n== information ==\n");
+    let analysis = information::analyse(cfg, &cfg.horizon);
+    print!("{}", report::information::summary(&analysis));
+    let written = report::information::write(&analysis, out_dir)?;
+    println!(
+        "\nwrote {} and {}",
+        written.csv.display(),
+        written.json.display()
+    );
+    if cfg.world.seeds > 1 {
+        let runs = with_rest(cfg, analysis, |c| information::analyse(c, &c.horizon));
+        print_ensemble(
+            report::information::ensemble_summary(&runs),
+            report::information::write_ensemble(&runs, out_dir),
         )?;
     }
     Ok(())

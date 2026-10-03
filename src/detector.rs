@@ -141,18 +141,25 @@ impl Inhabitant {
     }
 
     /// Cells of its own world an inhabitant can reach, wrapped onto the
-    /// torus, each with its Chebyshev distance to the window's edge.
+    /// torus, each with its Chebyshev distance (in fine cells) to the window's
+    /// edge.
+    ///
+    /// The inhabitant is placed in *base* cells, like the probe, so that it
+    /// covers the same physical region whether or not space is subdivided.
+    /// v0.9 placed it in fine cells, so an inhabitant in a subdivided universe
+    /// lived in a different, smaller region of the world than the same
+    /// inhabitant in a coarse one; the audit (`docs/audit.md` §2.5) records
+    /// what that did to the discrete-space comparison.
     fn cells(&self, geom: &Geometry) -> Vec<(usize, usize, usize)> {
-        let mut out = Vec::with_capacity(self.width * self.height);
-        for row in 0..self.height {
-            for col in 0..self.width {
-                let margin = col
-                    .min(row)
-                    .min(self.width - 1 - col)
-                    .min(self.height - 1 - row);
+        let s = geom.scale;
+        let (w, h) = (self.width * s, self.height * s);
+        let mut out = Vec::with_capacity(w * h);
+        for row in 0..h {
+            for col in 0..w {
+                let margin = col.min(row).min(w - 1 - col).min(h - 1 - row);
                 out.push((
-                    geom.wrap_x((self.x + col) as isize),
-                    geom.wrap_y((self.y + row) as isize),
+                    geom.wrap_x((self.x * s + col) as isize),
+                    geom.wrap_y((self.y * s + row) as isize),
                     margin,
                 ));
             }

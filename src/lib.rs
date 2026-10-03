@@ -26,6 +26,7 @@
 //! - [`limits`] — Theory 1 as a factorial experiment against four nulls
 //! - [`layer`] — nesting: layers hosting layers, each poorer than its host
 //! - [`pipe`] — the one-way serializing channel between layers
+//! - [`information`] — what crosses the pipe, in bits, per task and encoding
 //! - [`detector`] — whether an inhabitant can find the limits from inside
 //! - [`sweep`] — fine-tuning: how narrow the productive band of constants is
 //! - [`bootloader`] — emergent structures that transport computation, and the
@@ -53,6 +54,7 @@ pub mod constraints;
 pub mod detector;
 pub mod experiment;
 pub mod golden;
+pub mod information;
 pub mod layer;
 pub mod limits;
 pub mod observables;
