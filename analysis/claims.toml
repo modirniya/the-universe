@@ -775,7 +775,7 @@ derivation = "measure::tests::the_band_family_has_forty_six_squared_laws_all_dis
 
 [[claim]]
 id = "T6-FND-001"
-text = "Productive laws are a minority under every prior and every criterion, in every seed. Across 20 seeds the lowest share is 0.055 +/- 0.035 (all band laws, Conway bar) and the highest 0.446 +/- 0.037 (all band laws, perturbation growth); the life-like sample gives 0.09 to 0.17."
+text = "In the baseline universe (64x64, 80 ticks, density 0.30) productive laws are a minority under every prior and every criterion, in every seed. Across 20 seeds the lowest share is 0.055 +/- 0.035 (all band laws, Conway bar) and the highest 0.446 +/- 0.037 (all band laws, perturbation growth); the life-like sample gives 0.09 to 0.17. 'In the baseline universe' is load-bearing: see T6-FND-003."
 category = "computational_finding"
 module = "measure"
 experiment = "measure --config configs/measure.toml"
@@ -817,6 +817,45 @@ design_version = 1
   file = "measure/measure.json"
   path = "shares[prior=all band laws,criterion=perturbation growth].share.mean"
   min = 0.3
+
+[[claim]]
+id = "T6-FND-003"
+text = "The productive share also depends on the universe the laws are tried in. Scoring the band family at other sizes, durations and densities (three seeds each): under the compressibility criterion the share stays at 0.32-0.33 everywhere; under the Conway bar it runs from 0.02 (160 ticks) to 0.19 (40 ticks); under perturbation growth from 0.36 (edge 32) to 0.60 (edge 96) and 0.63 (40 ticks) -- a MAJORITY in two of the six settings. Conway itself fails the growth criterion in every seed at edge 32 and at 160 ticks. 'Fine-tuning' under that criterion is a statement about a world size and a run length."
+category = "computational_finding"
+module = "measure"
+experiment = "measure --config configs/measure.toml"
+artifacts = "measure"
+metric = "share of the 2116 band laws admitted, per setting and criterion"
+seeds = 3
+controls = "the baseline setting; the three criteria; whether Conway passes"
+status = "verified"
+last_verified_commit = "PENDING"
+design_version = 1
+  [[claim.check]]
+  file = "measure/measure_sensitivity.csv"
+  column = "fraction"
+  where = { setting = "ticks 40", criterion = "perturbation growth" }
+  aggregate = "mean"
+  min = 0.5
+  [[claim.check]]
+  file = "measure/measure_sensitivity.csv"
+  column = "fraction"
+  where = { setting = "edge 96", criterion = "perturbation growth" }
+  aggregate = "mean"
+  min = 0.5
+  [[claim.check]]
+  file = "measure/measure_sensitivity.csv"
+  column = "fraction"
+  where = { setting = "ticks 160", criterion = "compressibility" }
+  aggregate = "mean"
+  min = 0.28
+  max = 0.38
+  [[claim.check]]
+  file = "measure/measure_sensitivity.csv"
+  column = "fraction"
+  where = { setting = "ticks 160", criterion = "resembles conway" }
+  aggregate = "mean"
+  max = 0.1
 
 [[claim]]
 id = "T6-HYP-001"

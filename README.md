@@ -68,7 +68,7 @@ cargo run --release -- boot    --config configs/boot-permissive.toml
 cargo run --release -- edge    --config configs/edge.toml      # Theories 2 and 5: why chains end; ~5 min
 cargo run --release -- sweep   --config configs/sweep.toml     # Theory 6: the original grid sweep; ~3 min
 cargo run --release -- measure --config configs/measure.toml   # Theory 6: five priors, six universes; ~35 min
-cargo test --workspace                                        # 230 tests
+cargo test --workspace                                        # 309 tests
 ```
 
 Times are for four cores of a 2026 x86_64 container; the pinned seed runs
@@ -101,8 +101,9 @@ below; `verified` and `exploratory` are ledger statuses.
 | The tracker's false-positive floor is 5% (`T5-FND-001`) | verified | 0.35 vs 7.3 bootloaders per thousand cells; real above shuffled in 20/20. |
 | Bootloader density rises down the chain (`T5-FND-002`) | withdrawn | 7.3 → 10.8 → 13.0 per thousand cells, matched by standalone worlds of the same size. The count fell because the world shrank. |
 | The gate never fires under the shipped floors; fires in 16/20 under permissive ones (`T5-FND-003`) | verified | Sole stop in 7/20; in the edge map sterility alone binds in at most 2 of 10 seeds per cell. |
-| Productive laws are a minority under every prior and criterion (`T6-FND-001`) | verified | From 0.055 ± 0.035 to 0.446 ± 0.037. |
+| In the baseline universe, productive laws are a minority under every prior and criterion (`T6-FND-001`) | verified | From 0.055 ± 0.035 to 0.446 ± 0.037. |
 | The share is the prior's and the criterion's as much as the laws' (`T6-FND-002`) | verified | A factor of eight. "Fine-tuning is X%" means nothing here without both named. |
+| The share is also the universe's (`T6-FND-003`) | verified | Under the growth criterion, 36% at edge 32 and 63% at 40 ticks — a majority in two of six settings. |
 | Same seed, same universe, on three targets (`GEN-FND-001`) | verified | Fingerprint `8151296893090507384`, native and WebAssembly. |
 
 ### What v1.0 withdrew
@@ -447,15 +448,39 @@ life-like sample    0.092 ± 0.079            0.100 ± 0.006            0.172 ±
 lowest share: 0.055 ± 0.035    highest: 0.446 ± 0.037
 ```
 
-**Productive laws are a minority under every prior and criterion in every
-seed** (`T6-FND-001`). **How small a minority is the prior's and the criterion's
+**In the baseline universe, productive laws are a minority under every prior
+and criterion in every seed** (`T6-FND-001`). **How small a minority is the prior's and the criterion's
 as much as the laws'** (`T6-FND-002`): a factor of eight separates the lowest
 share from the highest, and nothing in the model privileges one way of counting.
 Under all band laws with the growth criterion the share is 44%, close to a
 majority; under the life-like sample with the Conway bar it is 9%. Fine-tuning
 as a sentence with one number in it is not something this model can say.
 
-SENSITIVITY_PLACEHOLDER
+**The share also depends on the universe the laws are tried in**
+(`T6-FND-003`). The band family re-scored at other sizes, durations and
+densities, three seeds each, with the criteria's bands held where the baseline
+fixed them:
+
+```
+setting          resembles conway    conway   compressibility   conway   perturbation growth   conway
+baseline           0.066 ± 0.044      3/3      0.329 ± 0.006     3/3      0.459 ± 0.027         2/3
+edge 32            0.103 ± 0.086      3/3      0.324 ± 0.006     3/3      0.362 ± 0.040         0/3
+edge 96            0.079 ± 0.031      3/3      0.333 ± 0.004     3/3      0.595 ± 0.025         2/3
+ticks 40           0.189 ± 0.006      3/3      0.332 ± 0.005     3/3      0.628 ± 0.027         2/3
+ticks 160          0.024 ± 0.013      3/3      0.325 ± 0.002     3/3      0.384 ± 0.027         0/3
+density 0.15       0.084 ± 0.036      3/3      0.320 ± 0.005     3/3      0.418 ± 0.012         1/3
+density 0.45       0.066 ± 0.009      3/3      0.317 ± 0.006     3/3      0.466 ± 0.019         1/3
+```
+
+(`conway` is the number of seeds in which Conway's own law passed.) The
+compressibility share does not move. The Conway-resemblance share runs from 2%
+at 160 ticks to 19% at 40. The perturbation-growth share runs from 36% to 63%
+and is a **majority** at edge 96 and at 40 ticks, and Conway itself fails that
+criterion in every seed at edge 32 and at 160 ticks. "Productive laws are a
+minority" is true of the baseline universe under every criterion; under the
+growth criterion it is false of two of the six others. Fine-tuning, measured
+this way, is a statement about a world size and a run length as well as about
+laws.
 
 Nothing here bears on the constants of our universe (`T6-HYP-001`).
 

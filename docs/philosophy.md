@@ -258,8 +258,12 @@ criteria, and the productive share is reported under five ways of weighting
 laws.
 
 **What would falsify it within the model:** complexity turning out to be
-common. Productive laws are a minority under every prior and criterion in every
-seed, so that much survives. How small a minority does not survive as a number:
+common. In the baseline universe productive laws are a minority under every
+prior and criterion in every seed, so that much survives there. It does not
+survive a change of universe: at a larger world or a shorter run the
+perturbation-growth criterion admits a majority of the band family (60% and
+63%), so under that criterion complexity *is* common in two of the six
+settings tried. How small a minority does not survive as a number either:
 from 5.5% (all band laws, the Conway-resemblance bar) to 45% (all band laws,
 perturbation growth), a factor of eight that is the prior's and the criterion's
 as much as the laws'. v0.5's "19%" was one prior, one criterion, one seed, and

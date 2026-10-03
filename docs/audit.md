@@ -352,7 +352,7 @@ Correctly labelled already. The ablation confirms the code does what it says.
 | § | Weakness | What the redesign did |
 | --- | --- | --- |
 | 1.1 | Indicator mean field | `CoarseRule` is now an explicit parameter with `Indicator`, `Binomial` and `Frozen` variants; every lazy-rendering result is reported under each, and the published default is stated. |
-| 1.2 | Wrong null, one pair, whole-run mean | `limits` runs four null models (different seed, one-cell perturbation of the same seed, initial-density perturbation, shuffled surrogate), reports divergence over the second half and at the final tick, and standardises every distance by the null's dispersion. |
+| 1.2 | Wrong null, one pair, whole-run mean | `limits` runs four null models (different seed, one-cell perturbation of the same seed, initial-density perturbation, shuffled surrogate) plus 190 pairwise reference pairs, reports divergence over the second half and at the final tick, and standardises seven observables by their seed-to-seed spread. The free-lunch claim is withdrawn. |
 | 1.3 | Speed cap changes the law | Reported as a change of law; occupancy difference printed beside divergence. |
 | 1.4 | Ratios are arithmetic | Classified as consequences in the ledger; no longer listed as findings. |
 | 1.5 | No factorial, one metric | Full 2⁴ factorial; six observables; cost–fidelity table and Pareto set. |
@@ -364,11 +364,28 @@ Correctly labelled already. The ablation confirms the code does what it says.
 | 3.2 | Horizon inside the observed region | Config fixed and the comment corrected. |
 | 3.3 | Black-hole naming | Renamed to the horizon/pipe abstraction throughout; the analogy stays in `docs/philosophy.md` as a physical hypothesis. |
 | 4.2 | Nesting = size | Size control added and its tautology stated; churn-against-size curve for standalone universes. |
-| 4.3 | One-plane termination map | `terminate` maps budget/space/quantisation endings over four axes analytically. |
-| 5.1 | One prior | Four priors, including the full band family and random Life-like rules. |
-| 5.3 | Finite size | Size, duration and density sensitivity. |
-| 6.1 | No false-positive rate | Frame-shuffled surrogate control. |
-| 6.2 | Area scaling | Bootloaders reported per thousand cells. |
+| 4.3 | One-plane termination map | `nest` maps budget/space/quantisation endings over fractions, floors, block sizes and root sizes analytically (`layer::map_terminations`). |
+| 5.1 | One prior | Five priors (`measure`), including the full band family and a sample of the life-like rules; the share is reported as a range with its priors named. |
+| 5.3 | Finite size | The band family re-scored at two sizes, two durations and two densities on three seeds. |
+| 6.1 | No false-positive rate | Frame-shuffled surrogate control: 5% of the real count. |
+| 6.2 | Area scaling | Bootloaders reported per thousand cells; the density rises down the chain and the v0.9 claim is withdrawn. |
 | 7 | Statistics, provenance, ledger | `stats` module; `metadata.json` on every run; `analysis/claims.toml` checked in CI. |
 
 Items left open are listed in the README under "What remains unresolved".
+
+## 10. What the redesign found that the audit had not predicted
+
+- The v0.9 "deepest layer is calmer" result did not merely weaken under the
+  binomial closure; it inverted (0/20). Churn follows the share of blocks the
+  rescaled probe resolves.
+- Bootloader density *rises* down the chain once counts are divided by area.
+- Lazy rendering is findable by an inhabitant whose looking renders, through
+  the boundary of what it renders — and so is a fully rendered universe with
+  equally approximated ground. The v0.9 "concealed in principle" argument
+  omitted the boundary.
+- At the horizon placement the config always described, one and two uniform
+  bits carry no information at all; an adaptive four-bit code carries more than
+  the exact magnitude read at 64 levels. "Two to six bits keep 90%" was one
+  encoding at one placement.
+- The productive share of laws spans a factor of eight across priors and
+  criteria. Fine-tuning survives as "a minority" and as nothing more precise.

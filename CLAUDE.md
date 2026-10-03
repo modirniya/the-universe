@@ -120,7 +120,7 @@ Recorded because they are results of the model; each has a ledger id.
 - At full width the horizon carries 1.4 bits about itself, 0.5 about the child, 0.3 ten ticks ahead; two uniform bits carry 0.00 at the shipped placement; an adaptive four bits carry 1.9. (T3-FND-001/002)
 - Lazy rendering is findable by a rendering inhabitant via `edge_excess` (power 19/20, FPR 1/20, exploratory) — and so is the resample control (20/20): the boundary approximation is what is detected. Negative control ceiling 0.10. (DET-FND-001/002)
 - Bootloader tracker false-positive floor 5%; density rises down the chain (7.3 → 10.8 → 13.0 per 1000 cells) and matches standalone same-size worlds. Gate never fires under shipped floors; 16/20 under permissive, sole stop 7/20. (T5-FND-001/002/003)
-- Productive laws are a minority under every prior and criterion, from 0.055 to 0.446: a factor of eight that is the prior's and the criterion's. (T6-FND-001/002)
+- In the baseline universe productive laws are a minority under every prior and criterion, from 0.055 to 0.446: a factor of eight that is the prior's and the criterion's. At edge 96 or 40 ticks the growth criterion admits a majority (0.60, 0.63). (T6-FND-001/002/003)
 - Rust folds float sums from `-0.0`; normalise with `+ 0.0` before reporting.
 
 **Withdrawn from v0.9** (kept in the ledger as `withdrawn`): the free lunch below the chaos floor; the calmer deepest layer; poorer layers producing less life; looking concealing lazy rendering; 2–6 bits keeping 90%; √2 as a measured finding; 19% productive. See `docs/audit.md` for why.
