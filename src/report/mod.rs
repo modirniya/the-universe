@@ -23,6 +23,8 @@ use std::path::{Path, PathBuf};
 pub mod detect;
 pub mod information;
 pub mod limits;
+pub mod measure;
+pub mod nesting;
 
 /// Files written by one experiment.
 pub struct Written {

@@ -365,26 +365,38 @@ pub fn ensemble_summary(runs: &[(u64, Analysis)]) -> String {
     );
 
     // Where the shipped encoding stops gaining: the narrowest width whose
-    // corrected MI on global_now is within 90% of the full width's, per seed.
-    let widths: Vec<f64> = runs
-        .iter()
-        .map(|(_, a)| {
-            let full = a
-                .row(Encoding::Uniform(128), Task::GlobalNow)
-                .map_or(f64::NAN, |r| r.measure.mi_corrected());
-            [1u32, 2, 3, 4, 6, 128]
-                .iter()
-                .find(|b| {
-                    a.row(Encoding::Uniform(**b), Task::GlobalNow)
-                        .is_some_and(|r| r.measure.mi_corrected() >= 0.9 * full)
-                })
-                .map_or(f64::NAN, |b| f64::from(*b))
-        })
-        .collect();
+    // corrected MI on global_now is within 90% of the full width's, counted per
+    // seed. A count, not a mean: the answer is bimodal (a few bits, or only the
+    // full width) and a mean of it would be a number that describes no seed.
+    let mut counts: Vec<(u32, usize)> = [1u32, 2, 3, 4, 6, 128].iter().map(|b| (*b, 0)).collect();
+    let mut none = 0usize;
+    for (_, a) in runs {
+        let full = a
+            .row(Encoding::Uniform(128), Task::GlobalNow)
+            .map_or(f64::NAN, |r| r.measure.mi_corrected());
+        let found = counts.iter_mut().find(|(b, _)| {
+            a.row(Encoding::Uniform(*b), Task::GlobalNow)
+                .is_some_and(|r| r.measure.mi_corrected() >= 0.9 * full && full > 0.0)
+        });
+        match found {
+            Some((_, k)) => *k += 1,
+            None => none += 1,
+        }
+    }
     let _ = writeln!(
         s,
-        "narrowest width keeping 90% of the full-width information about global_now: {}",
-        fmt(&Summary::of(widths))
+        "narrowest width keeping 90% of the full-width information about global_now, seeds per width: {}{}",
+        counts
+            .iter()
+            .filter(|(_, k)| *k > 0)
+            .map(|(b, k)| format!("{b} bits: {k}"))
+            .collect::<Vec<_>>()
+            .join(", "),
+        if none > 0 {
+            format!("; no information at any width: {none}")
+        } else {
+            String::new()
+        }
     );
     let horizon = of(&|a| {
         a.row(Encoding::Uniform(128), Task::GlobalNow)
@@ -397,8 +409,12 @@ pub fn ensemble_summary(runs: &[(u64, Analysis)]) -> String {
     });
     let _ = writeln!(
         s,
-        "the horizon carries {} bits about the whole child; a window elsewhere carries {}.\n\
-         if those agree, the horizon is a window and the mechanism adds nothing.",
+        "the horizon carries {} bits about the whole child; a window half a world away carries {}.\n\
+         the horizon straddles rendered and coarse ground; the far window lies wholly in coarse\n\
+         ground, whose density is a closure's output and varies little. a difference between them\n\
+         is a difference between rendered and unrendered ground, not evidence of a mechanism.\n\
+         the quadrants row against quadrant_pattern is the encoding reading itself and is a check\n\
+         on the estimator, not a result.",
         fmt(&horizon),
         fmt(&window)
     );

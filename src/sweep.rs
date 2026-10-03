@@ -52,12 +52,12 @@ pub const CONWAY_SURVIVE_CENTRE: f64 = 0.3125;
 
 /// Build a rule from the two centres.
 pub fn rules_at(birth_centre: f64, survive_centre: f64) -> Rules {
-    Rules {
-        birth_lo: birth_centre - BIRTH_HALF_WIDTH,
-        birth_hi: birth_centre + BIRTH_HALF_WIDTH,
-        survive_lo: survive_centre - SURVIVE_HALF_WIDTH,
-        survive_hi: survive_centre + SURVIVE_HALF_WIDTH,
-    }
+    Rules::bands(
+        birth_centre - BIRTH_HALF_WIDTH,
+        birth_centre + BIRTH_HALF_WIDTH,
+        survive_centre - SURVIVE_HALF_WIDTH,
+        survive_centre + SURVIVE_HALF_WIDTH,
+    )
 }
 
 /// What one setting of the constants produced.
@@ -381,12 +381,12 @@ pub fn rules_with(
     birth_half: f64,
     survive_half: f64,
 ) -> Rules {
-    Rules {
-        birth_lo: birth_centre - birth_half,
-        birth_hi: birth_centre + birth_half,
-        survive_lo: survive_centre - survive_half,
-        survive_hi: survive_centre + survive_half,
-    }
+    Rules::bands(
+        birth_centre - birth_half,
+        birth_centre + birth_half,
+        survive_centre - survive_half,
+        survive_centre + survive_half,
+    )
 }
 
 /// Everything the three criteria look at, for one law.
@@ -736,12 +736,7 @@ mod tests {
         // Everything is born and everything survives.
         let c = cfg();
         let o = evaluate(&c, 0.5, 0.5, None);
-        let wide = Rules {
-            birth_lo: -1.0,
-            birth_hi: 2.0,
-            survive_lo: -1.0,
-            survive_hi: 2.0,
-        };
+        let wide = Rules::bands(-1.0, 2.0, -1.0, 2.0);
         assert!(wide.born(0.5) && wide.survives(0.5));
         // The swept version is narrower, but the point stands: extremes settle.
         assert!(o.activity.is_finite());

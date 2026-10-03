@@ -29,6 +29,7 @@
 //! - [`information`] — what crosses the pipe, in bits, per task and encoding
 //! - [`detector`] — whether an inhabitant can find the limits from inside
 //! - [`sweep`] — fine-tuning: how narrow the productive band of constants is
+//! - [`measure`] — the measure problem: the productive share under five priors
 //! - [`bootloader`] — emergent structures that transport computation, and the
 //!   seed they hand to the next layer
 //! - [`report`] — CSV, JSON and a summary that declines to overstate the result
@@ -57,6 +58,7 @@ pub mod golden;
 pub mod information;
 pub mod layer;
 pub mod limits;
+pub mod measure;
 pub mod observables;
 pub mod observer;
 pub mod physics;

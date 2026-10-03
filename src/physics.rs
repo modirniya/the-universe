@@ -20,6 +20,14 @@ use crate::space::World;
 use serde::Deserialize;
 
 /// A life-like rule written in densities instead of counts.
+///
+/// The four bands are the rule as the config states it and as every
+/// experiment but one uses it. The optional `table` is for the fine-tuning
+/// measure analysis only: an outer-totalistic rule on eight neighbours given
+/// as two bit masks over the neighbour count `k = 0..8`, which the band form
+/// cannot express when the admitted counts are not contiguous. A table is
+/// valid only at radius 1 with discrete space (eight neighbours), is never
+/// read from a config, and takes precedence over the bands when present.
 #[derive(Clone, Copy, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Rules {
@@ -27,6 +35,8 @@ pub struct Rules {
     pub birth_hi: f64,
     pub survive_lo: f64,
     pub survive_hi: f64,
+    #[serde(skip)]
+    pub table: Option<(u16, u16)>,
 }
 
 impl Default for Rules {
@@ -38,19 +48,73 @@ impl Default for Rules {
             birth_hi: 0.4375,
             survive_lo: 0.1875,
             survive_hi: 0.4375,
+            table: None,
         }
     }
 }
 
+/// Neighbours in a radius-1 Moore neighbourhood: the only size a rule table
+/// is defined for.
+pub const TABLE_NEIGHBOURS: u32 = 8;
+
 impl Rules {
+    /// A rule from two bands.
+    pub fn bands(birth_lo: f64, birth_hi: f64, survive_lo: f64, survive_hi: f64) -> Rules {
+        Rules {
+            birth_lo,
+            birth_hi,
+            survive_lo,
+            survive_hi,
+            table: None,
+        }
+    }
+
+    /// An outer-totalistic rule on eight neighbours: bit `k` of `birth` says a
+    /// dead cell with `k` live neighbours is born, bit `k` of `survive` that a
+    /// live one survives. The bands are set to the table's hull so that code
+    /// reading them sees something sensible, but the table decides.
+    pub fn table(birth: u16, survive: u16) -> Rules {
+        let hull = |mask: u16| {
+            let lo = (0..=TABLE_NEIGHBOURS).find(|k| mask & (1 << k) != 0);
+            let hi = (0..=TABLE_NEIGHBOURS).rev().find(|k| mask & (1 << k) != 0);
+            match (lo, hi) {
+                (Some(lo), Some(hi)) => (
+                    (lo as f64 - 0.5) / TABLE_NEIGHBOURS as f64,
+                    (hi as f64 + 0.5) / TABLE_NEIGHBOURS as f64,
+                ),
+                _ => (2.0, -1.0),
+            }
+        };
+        let (birth_lo, birth_hi) = hull(birth);
+        let (survive_lo, survive_hi) = hull(survive);
+        Rules {
+            birth_lo,
+            birth_hi,
+            survive_lo,
+            survive_hi,
+            table: Some((birth & 0x1FF, survive & 0x1FF)),
+        }
+    }
+
+    #[inline]
+    fn count_of(d: f64) -> u32 {
+        ((d * TABLE_NEIGHBOURS as f64).round() as u32).min(TABLE_NEIGHBOURS)
+    }
+
     #[inline]
     pub fn born(&self, d: f64) -> bool {
-        d >= self.birth_lo && d <= self.birth_hi
+        match self.table {
+            Some((birth, _)) => birth & (1 << Self::count_of(d)) != 0,
+            None => d >= self.birth_lo && d <= self.birth_hi,
+        }
     }
 
     #[inline]
     pub fn survives(&self, d: f64) -> bool {
-        d >= self.survive_lo && d <= self.survive_hi
+        match self.table {
+            Some((_, survive)) => survive & (1 << Self::count_of(d)) != 0,
+            None => d >= self.survive_lo && d <= self.survive_hi,
+        }
     }
 
     /// The law, as one branch. `alive` is the cell's own state; `d` is the
@@ -344,6 +408,30 @@ mod tests {
             assert_eq!(r.born(d), k == 3, "birth at {k}/8");
             assert_eq!(r.survives(d), k == 2 || k == 3, "survival at {k}/8");
         }
+    }
+
+    #[test]
+    fn a_rule_table_reproduces_conway_and_can_say_what_bands_cannot() {
+        let conway = Rules::table(1 << 3, (1 << 2) | (1 << 3));
+        for k in 0..=8 {
+            let d = k as f64 / 8.0;
+            assert_eq!(conway.born(d), Rules::default().born(d), "birth at {k}");
+            assert_eq!(
+                conway.survives(d),
+                Rules::default().survives(d),
+                "survival at {k}"
+            );
+        }
+        // Birth on 2 or 5 neighbours: not an interval, so no band form exists.
+        let gapped = Rules::table((1 << 2) | (1 << 5), 0);
+        assert!(gapped.born(2.0 / 8.0) && gapped.born(5.0 / 8.0));
+        assert!(!gapped.born(3.0 / 8.0) && !gapped.born(4.0 / 8.0));
+        assert!(!gapped.survives(3.0 / 8.0));
+        assert_eq!(gapped.table, Some(((1 << 2) | (1 << 5), 0)));
+        // A blinker still blinks under the table form of Conway.
+        let w = world_from(16, 16, &[(5, 4), (5, 5), (5, 6)]);
+        let a = step(&w, &conway, &full_res(1)).0;
+        assert_eq!(live_cells(&a), vec![(4, 5), (5, 5), (6, 5)]);
     }
 
     #[test]

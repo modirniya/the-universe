@@ -8,7 +8,7 @@ use universe_core::bootloader::{self, Gate};
 use universe_core::budget::Budget;
 use universe_core::config::Config;
 use universe_core::detector::{self, Inhabitant};
-use universe_core::{experiment, information, layer, limits, pipe, report, sweep};
+use universe_core::{experiment, information, layer, limits, measure, pipe, report, sweep};
 
 const USAGE: &str = "\
 the-universe — a runnable model of a simulation-hypothesis framework
@@ -21,6 +21,7 @@ USAGE:
     the-universe sweep --config <FILE> [OPTIONS]
     the-universe boot  --config <FILE> [OPTIONS]
     the-universe edge  --config <FILE> [OPTIONS]
+    the-universe measure --config <FILE> [OPTIONS]
 
 COMMANDS:
     run     Run every setting of the four limits against the unconstrained
@@ -29,8 +30,10 @@ COMMANDS:
             (Theory 1: limits as optimizations.)
 
     nest    Build a chain of universes, each running on a fraction of its
-            host's budget, and report how deep it gets before it cannot
-            afford another. (Theory 2: nesting and degradation.)
+            host's budget; report how deep it gets, why chains end across
+            fractions, floors, block and root sizes (from the definitions
+            alone), and how each layer compares to a standalone universe of
+            its size. (Theory 2: nesting and degradation.)
 
     pipe    Transmit a universe through a one-way serializing channel and
             report what survived, in bits: per task, per encoding, against a
@@ -55,6 +58,11 @@ COMMANDS:
             size floors, with and without the bootloader gate, and map why
             each chain stopped: budget, space, or sterility alone.
             (Theories 2 and 5: where poverty and sterility meet.)
+
+    measure Score every band law and a sample of all life-like rules under
+            three criteria, and report the productive share under five ways
+            of weighting laws and in six other universes. (Theory 6: the
+            measure problem.)
 
 OPTIONS:
     --config <FILE>   Universe definition (TOML). Required.
@@ -119,6 +127,8 @@ enum Command {
     Boot,
     /// Theories 2 and 5: where a chain dies of poverty and where of sterility.
     Edge,
+    /// Theory 6: the productive share under five priors.
+    Measure,
 }
 
 /// `Ok(None)` means help was requested.
@@ -138,9 +148,10 @@ fn parse(argv: Vec<String>) -> Result<Option<Args>, String> {
         "sweep" => Command::Sweep,
         "boot" => Command::Boot,
         "edge" => Command::Edge,
+        "measure" => Command::Measure,
         other => {
             return Err(format!(
-                "unknown command `{other}`; the commands are `run`, `nest`, `pipe`, `detect`, `sweep`, `boot` and `edge`"
+                "unknown command `{other}`; the commands are `run`, `nest`, `pipe`, `detect`, `sweep`, `boot`, `edge` and `measure`"
             ));
         }
     };
@@ -249,7 +260,56 @@ fn execute(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
         Command::Sweep => execute_sweep(&cfg, &out_dir, args.steps),
         Command::Boot => execute_boot(&cfg, &out_dir, args.budget),
         Command::Edge => execute_edge(&cfg, &out_dir, args.budget),
+        Command::Measure => execute_measure(&cfg, &out_dir),
     }
+}
+
+fn execute_measure(cfg: &Config, out_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    println!(
+        "each universe: {}x{} base cells, {} ticks, seed {}; {} band laws and {} life-like rules",
+        cfg.world.width,
+        cfg.world.height,
+        cfg.world.ticks,
+        cfg.world.seed,
+        2116,
+        measure::LIFELIKE_SAMPLE
+    );
+    println!("scoring every law under three criteria ...\n");
+
+    let run = measure::run_measure(cfg);
+    print!("{}", report::measure::summary(&run));
+
+    let runs = with_rest(cfg, run, measure::run_measure);
+    if runs.len() > 1 {
+        println!();
+        print!("{}", report::measure::ensemble_summary(&runs));
+    }
+    let written = report::measure::write(&runs, out_dir)?;
+    println!(
+        "\nwrote {}, {} and {}",
+        written.csv.display(),
+        written.json.display(),
+        out_dir.join("laws.csv").display()
+    );
+
+    // The band family in other universes, on the first few seeds.
+    println!("\n== sensitivity ==\n");
+    let mut sens_cfg = cfg.clone();
+    sens_cfg.world.seeds = cfg.world.seeds.min(measure::SENSITIVITY_SEEDS);
+    let settings = |c: &Config| -> Vec<measure::SettingRun> {
+        measure::SETTINGS
+            .iter()
+            .map(|s| measure::run_setting(c, *s))
+            .collect()
+    };
+    let pinned = settings(&sens_cfg);
+    let sens = with_rest(&sens_cfg, pinned, settings);
+    print!("{}", report::measure::sensitivity_summary(&sens));
+    println!(
+        "\nwrote {}",
+        report::measure::write_sensitivity(&sens, out_dir)?.display()
+    );
+    Ok(())
 }
 
 /// Every ensemble member after the pinned one, with the pinned result put back
@@ -620,6 +680,22 @@ fn execute_nest(
         written.json.display()
     );
 
+    // The size control: a layer beside a standalone universe of its size.
+    println!();
+    let controls = layer::size_control(cfg, &chain);
+    print!("{}", report::nesting::size_control_summary(&controls));
+    let written = report::nesting::write_size_control(&controls, out_dir)?;
+    println!("wrote {}", written.json.display());
+
+    // Where a plain chain ends, from the definitions alone.
+    println!();
+    let cells = layer::map_terminations(cfg);
+    print!("{}", report::nesting::termination_summary(&cells));
+    println!(
+        "wrote {}",
+        report::nesting::write_terminations(&cells, out_dir)?.display()
+    );
+
     if cfg.world.seeds > 1 {
         let runs = with_rest(cfg, chain, |c| {
             layer::run_chain(c, root_budget, &c.nesting, |_, _| {})
@@ -629,6 +705,16 @@ fn execute_nest(
             report::write_chain_ensemble(&runs, out_dir),
         )?;
     }
+
+    // Churn against size for standalone universes, across seeds.
+    println!();
+    let curve = layer::churn_by_size(cfg);
+    let runs = with_rest(cfg, curve, layer::churn_by_size);
+    print!("{}", report::nesting::size_curve_summary(&runs));
+    println!(
+        "wrote {}",
+        report::nesting::write_size_curve(&runs, out_dir)?.display()
+    );
     Ok(())
 }
 
@@ -642,7 +728,9 @@ mod tests {
 
     #[test]
     fn seeds_is_accepted_by_every_command() {
-        for cmd in ["run", "nest", "pipe", "detect", "sweep", "boot"] {
+        for cmd in [
+            "run", "nest", "pipe", "detect", "sweep", "boot", "edge", "measure",
+        ] {
             let a = parse(argv(&format!("{cmd} --config c.toml --seeds 5")))
                 .unwrap()
                 .unwrap();
