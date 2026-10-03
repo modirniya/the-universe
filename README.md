@@ -838,23 +838,33 @@ counter, and the machine that wrote the README is not the machine reading it.
 
 ## Roadmap
 
-Every milestone on the original roadmap is done, and v0.7 makes it watchable:
+Every milestone on the original roadmap is done, v0.7 makes it watchable, and
+v0.9 checks what it actually showed:
 
 **v0.1** limits as optimizations · **v0.2** nesting and degradation ·
 **v0.3** the pipe · **v0.4** detection · **v0.5** the fine-tuning sweep ·
 **v0.6** bootloader life · **v0.7** WebAssembly and the viewer ·
-**v0.8** the analysis shell
+**v0.8** the analysis shell · **v0.9** ensembles, ablations, and what had to
+be run
 
 The six theories in [`docs/philosophy.md`](docs/philosophy.md) each have a
 module that implements them and a command that tests them, and v0.6 closes the
 loop by using all six at once.
 
-Beyond that, still unscheduled: the research track — seeded replicators,
-evolution — which stays deliberately out of scope.
+**v0.9 adds no theory. It tests the claims the first six milestones made.**
+Every finding now runs across a 20-seed ensemble, which corrected four numbers
+that seed 42 had overstated. The [What had to be run](#what-had-to-be-run)
+table separates results the model produced from results its definitions
+guaranteed. Three findings that were definitions are now measurements: the
+pipe's channel width, the bootloader gate, and fine-tuning across criteria. Two
+new analyses were added: lattice shape detection and a map of why chains end
+(`edge`).
 
-Also later, not scoped: a Python notebook shell for analysing experiment
-output, visuals, and a WASM build so strangers can run a universe in a browser
-tab.
+Beyond that, still unscheduled: the research track — seeded replicators,
+evolution — which stays deliberately out of scope. It is also where Theory 5
+would need to go to mean more than it does here: v0.9 showed that bootloaders
+decide whether a child universe exists, never what it is, and only a child that
+depends on what its bootloaders did would change that.
 
 ## Building
 
