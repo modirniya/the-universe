@@ -33,6 +33,7 @@
 //! - [`bootloader`] — emergent structures that transport computation, and the
 //!   seed they hand to the next layer
 //! - [`report`] — CSV, JSON and a summary that declines to overstate the result
+//! - [`provenance`] — `metadata.json`: where a run's numbers came from
 //! - [`rng`] — the creator's input channel; the reason runs are reproducible
 //! - [`stats`] — summaries, intervals and effect sizes for ensembles
 //! - [`golden`] — one fixed universe reduced to one number, so that
@@ -63,6 +64,7 @@ pub mod observables;
 pub mod observer;
 pub mod physics;
 pub mod pipe;
+pub mod provenance;
 pub mod report;
 pub mod rng;
 pub mod space;

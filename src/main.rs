@@ -8,6 +8,7 @@ use universe_core::bootloader::{self, Gate};
 use universe_core::budget::Budget;
 use universe_core::config::Config;
 use universe_core::detector::{self, Inhabitant};
+use universe_core::provenance::Provenance;
 use universe_core::{experiment, information, layer, limits, measure, pipe, report, sweep};
 
 const USAGE: &str = "\
@@ -235,6 +236,7 @@ fn parse(argv: Vec<String>) -> Result<Option<Args>, String> {
 }
 
 fn execute(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
+    let config_text = std::fs::read_to_string(&args.config)?;
     let mut cfg = Config::load(&args.config)?;
     if let Some(s) = args.seed {
         cfg.world.seed = s;
@@ -252,16 +254,52 @@ fn execute(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
         .clone()
         .unwrap_or_else(|| PathBuf::from(&cfg.report.out_dir));
 
-    match args.command {
-        Command::Run => execute_run(&cfg, &out_dir),
-        Command::Nest => execute_nest(&cfg, &out_dir, args.budget),
-        Command::Pipe => execute_pipe(&cfg, &out_dir),
-        Command::Detect => execute_detect(&cfg, &out_dir),
-        Command::Sweep => execute_sweep(&cfg, &out_dir, args.steps),
-        Command::Boot => execute_boot(&cfg, &out_dir, args.budget),
-        Command::Edge => execute_edge(&cfg, &out_dir, args.budget),
-        Command::Measure => execute_measure(&cfg, &out_dir),
+    let command = match args.command {
+        Command::Run => "run",
+        Command::Nest => "nest",
+        Command::Pipe => "pipe",
+        Command::Detect => "detect",
+        Command::Sweep => "sweep",
+        Command::Boot => "boot",
+        Command::Edge => "edge",
+        Command::Measure => "measure",
+    };
+    // Overrides are part of what produced the numbers, so they are recorded
+    // with the config text they modified.
+    let mut recorded = config_text.clone();
+    if args.seed.is_some() || args.ticks.is_some() || args.seeds.is_some() {
+        recorded.push_str(&format!(
+            "\n# command-line overrides: seed={:?} ticks={:?} seeds={:?}\n",
+            args.seed, args.ticks, args.seeds
+        ));
     }
+    let provenance = Provenance::new(command, &args.config, &recorded, &cfg);
+
+    match args.command {
+        Command::Run => execute_run(&cfg, &out_dir)?,
+        Command::Nest => execute_nest(&cfg, &out_dir, args.budget)?,
+        Command::Pipe => execute_pipe(&cfg, &out_dir)?,
+        Command::Detect => execute_detect(&cfg, &out_dir)?,
+        Command::Sweep => execute_sweep(&cfg, &out_dir, args.steps)?,
+        Command::Boot => execute_boot(&cfg, &out_dir, args.budget)?,
+        Command::Edge => execute_edge(&cfg, &out_dir, args.budget)?,
+        Command::Measure => execute_measure(&cfg, &out_dir)?,
+    }
+
+    let path = provenance.write(&out_dir)?;
+    println!(
+        "wrote {} (commit {}{}, {}, experiment design v{})",
+        path.display(),
+        &provenance.commit[..provenance.commit.len().min(12)],
+        if provenance.dirty == "true" {
+            ", dirty tree"
+        } else {
+            ""
+        },
+        provenance.target,
+        provenance.experiment_version
+    );
+    Ok(())
 }
 
 fn execute_measure(cfg: &Config, out_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
