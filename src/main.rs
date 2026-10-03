@@ -7,7 +7,7 @@ use std::process::ExitCode;
 use universe_core::bootloader::{self, Gate};
 use universe_core::budget::Budget;
 use universe_core::config::Config;
-use universe_core::detector::{self, Gaze, Inhabitant};
+use universe_core::detector::{self, Inhabitant};
 use universe_core::{experiment, layer, limits, pipe, report, sweep};
 
 const USAGE: &str = "\
@@ -38,8 +38,9 @@ COMMANDS:
             threshold. (Theory 3: black holes as pipes.)
 
     detect  Measure a universe from inside it, with no access to its config,
-            and report which of its limits leave a fingerprint an inhabitant
-            could find. (Detection.)
+            and test which limits an inhabitant can find: rules calibrated on
+            half the seeds, false-positive rate and power measured on the
+            other half, with a negative control. (Detection.)
 
     sweep   Vary the rule's constants across a grid, score what each setting
             produces, and report what share of the space is worth inhabiting.
@@ -446,38 +447,29 @@ fn execute_detect(cfg: &Config, out_dir: &Path) -> Result<(), Box<dyn std::error
     };
 
     println!(
-        "universe: {}x{} base cells, {} ticks, seed {}",
-        cfg.world.width, cfg.world.height, cfg.world.ticks, cfg.world.seed
+        "universe: {}x{} base cells, {} ticks, {} seeds from {}",
+        cfg.world.width, cfg.world.height, cfg.world.ticks, cfg.world.seeds, cfg.world.seed
     );
     println!(
-        "inhabitant: {}x{} region at ({}, {})\n",
-        who.width, who.height, who.x, who.y
+        "inhabitant: {}x{} region at ({}, {}); each seed measures {} universes under two gazes\n",
+        who.width,
+        who.height,
+        who.x,
+        who.y,
+        2 * (2 + detector::LIMITS.len() + 1)
     );
 
-    let rendering = detector::investigate_all(cfg, &who, Gaze::Rendering);
-    let passive = detector::investigate_all(cfg, &who, Gaze::Passive);
-    print!("{}", report::detect_report(&rendering, &passive));
+    let survey = detector::survey(cfg, &who, |seed| println!("  measuring seed {seed} ..."));
+    println!();
+    print!("{}", report::detect::summary(&survey));
 
-    let mut all = rendering.clone();
-    all.extend(passive.iter().cloned());
-    let written = report::write_detect(&all, out_dir)?;
+    let written = report::detect::write(&survey, out_dir)?;
     println!(
-        "\nwrote {} and {}",
+        "\nwrote {}, {} and {}",
         written.csv.display(),
-        written.json.display()
+        written.json.display(),
+        out_dir.join("evidence.csv").display()
     );
-
-    if cfg.world.seeds > 1 {
-        let runs = with_rest(cfg, all, |c| {
-            let mut f = detector::investigate_all(c, &who, Gaze::Rendering);
-            f.extend(detector::investigate_all(c, &who, Gaze::Passive));
-            f
-        });
-        print_ensemble(
-            report::detect_ensemble_summary(&runs),
-            report::write_detect_ensemble(&runs, out_dir),
-        )?;
-    }
     Ok(())
 }
 
