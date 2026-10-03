@@ -29,6 +29,7 @@ Usage:
     python3 analysis/ledger.py             # check everything under out/
     python3 analysis/ledger.py --out DIR   # artifacts elsewhere
     python3 analysis/ledger.py --no-artifacts   # structure and README only
+    python3 analysis/ledger.py --ignore-commit  # CI: fresh artifacts at HEAD, check the ranges
 
 Exit status is non-zero on any failure. Only the standard library is used, so
 the check can run in CI without a virtual environment.
@@ -123,29 +124,35 @@ def check_readme(claims: list[dict], chk: Check) -> None:
         else:
             chk.ok()
     # Anything that looks like a claim id in the README must be in the ledger.
-    for m in sorted(set(re.findall(r"\b(T\d-[A-Z]+-\d{3}|G-[A-Z]+-\d{3})\b", readme))):
+    for m in sorted(set(re.findall(r"\b((?:T\d|DET|GEN)-(?:DEF|CON|FND|HYP)-\d{3})\b", readme))):
         if m not in ids:
             chk.fail(f"README.md mentions {m}, which the ledger does not hold")
 
 
 def read_path(obj, path: str):
-    """Walk a JSON object by dotted path with [index] and [key=value] selectors."""
+    """Walk a JSON value by dotted path.
+
+    Each part is `key`, `key[sel]` or `[sel]` (a selector on the current value,
+    for a list-rooted document). A selector is an index, or one or more
+    `key=value` conditions separated by commas that pick the first element of a
+    list matching all of them.
+    """
     for part in path.split("."):
-        m = re.match(r"^([^\[]+)(\[.*\])?$", part)
+        m = re.match(r"^([^\[]*)(\[.*\])?$", part)
         if not m:
             raise KeyError(path)
         key, sel = m.group(1), m.group(2)
-        if isinstance(obj, dict):
+        if key:
+            if not isinstance(obj, dict):
+                raise KeyError(f"{key} in {path}")
             obj = obj[key]
-        else:
-            raise KeyError(f"{key} in {path}")
         if sel:
             for s in re.findall(r"\[([^\]]+)\]", sel):
                 if "=" in s:
-                    k, v = s.split("=", 1)
-                    matches = [o for o in obj if str(o.get(k)) == v]
+                    conds = [c.split("=", 1) for c in s.split(",")]
+                    matches = [o for o in obj if all(str(o.get(k)) == v for k, v in conds)]
                     if not matches:
-                        raise KeyError(f"no element with {k}={v} in {path}")
+                        raise KeyError(f"no element matching {s} in {path}")
                     obj = matches[0]
                 else:
                     obj = obj[int(s)]
@@ -187,11 +194,17 @@ def artifact_value(out: Path, check: dict):
     raise ValueError(f"cannot read {path.suffix}")
 
 
-def check_artifacts(claims: list[dict], out: Path, chk: Check) -> None:
+def check_artifacts(claims: list[dict], out: Path, chk: Check, ignore_commit: bool) -> None:
     for c in claims:
         if c.get("category") != "computational_finding":
             continue
         cid = c["id"]
+        if c.get("verified_by") == "tests":
+            # Established by the test suite rather than an artifact (the
+            # cross-target fingerprint); CI's `cargo test` and `wasm-pack test`
+            # are its check.
+            chk.ok()
+            continue
         exp_dir = out / c.get("artifacts", "")
         meta_path = exp_dir / "metadata.json"
         if not meta_path.exists():
@@ -199,7 +212,7 @@ def check_artifacts(claims: list[dict], out: Path, chk: Check) -> None:
             continue
         with open(meta_path, encoding="utf-8") as f:
             meta = json.load(f)
-        if c.get("last_verified_commit") != meta.get("commit"):
+        if not ignore_commit and c.get("last_verified_commit") != meta.get("commit"):
             if c.get("status") == "verified":
                 chk.fail(
                     f"{cid}: verified at {str(c.get('last_verified_commit'))[:12]} but the artifact is from "
@@ -220,6 +233,13 @@ def check_artifacts(claims: list[dict], out: Path, chk: Check) -> None:
                 continue
             lo, hi = check.get("min"), check.get("max")
             expect = check.get("equals")
+            contains = check.get("contains")
+            if contains is not None:
+                if not isinstance(value, list) or contains not in value:
+                    chk.fail(f"{cid}: {check['file']} {check.get('path')} does not contain {contains!r}: {value}")
+                    continue
+                chk.ok()
+                continue
             if expect is not None:
                 if str(value) != str(expect) and not (
                     isinstance(value, float) and abs(value - float(expect)) < 1e-9
@@ -239,18 +259,80 @@ def check_artifacts(claims: list[dict], out: Path, chk: Check) -> None:
             chk.ok()
 
 
+def stamp(out: Path) -> int:
+    """Record the commit and design version each claim's artifacts came from.
+
+    Run after `scripts/reproduce.sh` at a clean commit. Every claim with an
+    `artifacts` directory gets that directory's metadata commit and
+    experiment version written into its `last_verified_commit` and
+    `design_version` lines. Refuses if any artifact was built from a dirty tree
+    or if the artifacts disagree about the commit: a ledger must point at one
+    revision.
+    """
+    path = ROOT / "analysis" / "claims.toml"
+    text = path.read_text(encoding="utf-8")
+    claims = load_ledger()
+    commits: set[str] = set()
+    metas: dict[str, dict] = {}
+    for c in claims:
+        art = c.get("artifacts")
+        if art is None or c.get("verified_by") == "tests":
+            continue
+        meta_path = out / art / "metadata.json"
+        if not meta_path.exists():
+            print(f"{c['id']}: no metadata.json under {out / art}")
+            return 1
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        if meta.get("dirty") is not False:
+            print(f"{c['id']}: {meta_path} was built from a dirty tree; commit first")
+            return 1
+        commits.add(meta["commit"])
+        metas[c["id"]] = meta
+    if len(commits) > 1:
+        print(f"artifacts come from several commits: {sorted(commits)}; reproduce everything at one")
+        return 1
+    # Rewrite within each claim block, so claims keep their own values.
+    blocks = re.split(r"(?=^\[\[claim\]\])", text, flags=re.M)
+    out_blocks = []
+    for b in blocks:
+        m = re.search(r'^id\s*=\s*"([^"]+)"', b, flags=re.M)
+        if m and m.group(1) in metas:
+            meta = metas[m.group(1)]
+            b = re.sub(r'^last_verified_commit\s*=\s*"[^"]*"', f'last_verified_commit = "{meta["commit"]}"', b, flags=re.M)
+            b = re.sub(r"^design_version\s*=\s*\d+", f"design_version = {meta['experiment_version']}", b, flags=re.M)
+        out_blocks.append(b)
+    path.write_text("".join(out_blocks), encoding="utf-8")
+    print(f"stamped {len(metas)} claims at {next(iter(commits))[:12] if commits else 'n/a'}")
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--out", default=str(ROOT / "out"), help="artifact directory (default: out/)")
     ap.add_argument("--no-artifacts", action="store_true", help="check structure and README only")
+    ap.add_argument(
+        "--stamp",
+        action="store_true",
+        help="rewrite every claim's last_verified_commit and design_version from the artifacts' "
+        "metadata.json, after a full reproduction at one commit",
+    )
+    ap.add_argument(
+        "--ignore-commit",
+        action="store_true",
+        help="do not require the artifacts' commit to match the ledger's (for CI, which regenerates "
+        "the artifacts at HEAD and checks the ranges)",
+    )
     args = ap.parse_args()
+
+    if args.stamp:
+        return stamp(Path(args.out))
 
     claims = load_ledger()
     chk = Check()
     check_structure(claims, chk)
     check_readme(claims, chk)
     if not args.no_artifacts:
-        check_artifacts(claims, Path(args.out), chk)
+        check_artifacts(claims, Path(args.out), chk, args.ignore_commit)
     by_cat: dict[str, int] = {}
     for c in claims:
         by_cat[c.get("category", "?")] = by_cat.get(c.get("category", "?"), 0) + 1
