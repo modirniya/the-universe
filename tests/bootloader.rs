@@ -7,7 +7,7 @@
 
 use std::path::Path;
 
-use universe_core::bootloader::{self, Gate, MIN_LIFETIME};
+use universe_core::bootloader::{self, Ending, Gate, MIN_LIFETIME};
 use universe_core::budget::Budget;
 use universe_core::config::Config;
 use universe_core::constraints::Constraints;
@@ -215,4 +215,45 @@ fn the_ablation_report_says_when_the_gate_fired_harmlessly() {
     let text = report::gate_ablation(&g, &u);
     assert!(text.contains("would have stopped there anyway"), "{text}");
     assert!(!text.contains("never\nfired"));
+}
+
+// ---------------------------------------------------------------------------
+// Where a chain dies. The whole map is pinned in CI from a release build; these
+// pin one cell of each kind at seed 42, which is affordable in a debug build.
+// ---------------------------------------------------------------------------
+
+fn edge_cfg() -> Config {
+    Config::load(Path::new("configs/edge.toml")).expect("shipped config must load")
+}
+
+#[test]
+fn poor_children_die_of_poverty() {
+    let c = edge_cfg();
+    let cell = bootloader::ending_at(&c, root_budget(&c), 0.10, 2);
+    assert_eq!(cell.ending, Ending::Budget, "{cell:?}");
+}
+
+#[test]
+fn a_high_size_floor_ends_chains_on_space() {
+    let c = edge_cfg();
+    let cell = bootloader::ending_at(&c, root_budget(&c), 0.10, 24);
+    assert_eq!(cell.ending, Ending::Space, "{cell:?}");
+}
+
+#[test]
+fn rich_children_with_a_low_floor_die_of_sterility_alone() {
+    let c = edge_cfg();
+    let cell = bootloader::ending_at(&c, root_budget(&c), 0.50, 2);
+    assert_eq!(cell.ending, Ending::Sterile, "{cell:?}");
+    assert!(cell.ungated_depth > cell.gated_depth);
+}
+
+#[test]
+fn a_sterile_label_is_not_credited_when_another_limit_also_binds() {
+    // The chain's own label says sterility; the ablation says the chain would
+    // have stopped at the same depth without the gate.
+    let c = edge_cfg();
+    let cell = bootloader::ending_at(&c, root_budget(&c), 0.20, 2);
+    assert_eq!(cell.ending, Ending::Tied, "{cell:?}");
+    assert_eq!(cell.ungated_depth, cell.gated_depth);
 }

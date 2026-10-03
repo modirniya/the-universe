@@ -88,6 +88,9 @@ jobs:
       - name: Run the boot chain under permissive floors
         run: cargo run --release -- boot --config configs/boot-permissive.toml
 
+      - name: Run the map of where chains die
+        run: cargo run --release -- edge --config configs/edge.toml
+
       - name: Artifacts were written
         run: |
           test -s out/runs.csv && test -s out/report.json
@@ -98,6 +101,7 @@ jobs:
           test -s out/sweep/sensitivity.json && test -s out/sweep/sensitivity_ensemble.csv
           test -s out/boot/boot.csv && test -s out/boot/boot.json
           test -s out/boot/gate.csv && test -s out/boot-permissive/gate.csv
+          test -s out/edge/edge.csv
           test -s out/ensemble.csv && test -s out/ensemble.json
           for d in nesting pipe detect sweep boot; do test -s out/$d/ensemble.csv; done
 
@@ -499,6 +503,59 @@ jobs:
               print("\nFAILED:", *fail, sep="\n  ")
               sys.exit(1)
           print("\nthe ensemble findings hold")
+          PY
+
+      - name: The map of where chains die is pinned at seed 42
+        run: |
+          python3 - <<'PY'
+          import csv, sys
+
+          # Rows are size floors, columns are degradation fractions, in the
+          # order bootloader::EDGE_FLOORS and EDGE_FRACTIONS list them.
+          # $ budget, # space, ~ threshold, S sterility alone, s sterile but tied.
+          pinned = {
+              2:  "$$s$$sS",
+              4:  "$$s$$sS",
+              6:  "$$s$$sS",
+              8:  "$$s$$sS",
+              12: "#$#$##s",
+              16: "#######",
+              24: "#######",
+          }
+          fractions = ["0.10", "0.15", "0.20", "0.25", "0.30", "0.40", "0.50"]
+          glyph = {"budget": "$", "space": "#", "threshold": "~", "sterile": "S", "tied": "s"}
+
+          rows = list(csv.DictReader(open("out/edge/edge.csv")))
+          seed42 = {(int(r["viable_edge"]), r["fraction"]): glyph[r["ending"]]
+                    for r in rows if r["seed"] == "42"}
+          fail = []
+          for edge, want in pinned.items():
+              got = "".join(seed42.get((edge, f), "?") for f in fractions)
+              print(f"  edge {edge:>2}  {got}")
+              if got != want:
+                  fail.append(f"edge {edge}: expected {want}, got {got}")
+
+          # Sterility alone binds in some seeds, and is never the commonest
+          # ending in any cell: a real limit, and a rare one.
+          seeds = {r["seed"] for r in rows}
+          if not any(r["ending"] == "sterile" for r in rows):
+              fail.append("sterility alone never bound in any seed")
+          cells = {}
+          for r in rows:
+              cells.setdefault((r["viable_edge"], r["fraction"]), []).append(r["ending"])
+          for cell, endings in cells.items():
+              if endings.count("sterile") * 2 > len(endings):
+                  fail.append(f"sterility alone was the majority ending at {cell}")
+          # Sterility is credited only where the ungated chain went deeper.
+          for r in rows:
+              if r["ending"] == "sterile" and int(r["ungated_depth"]) <= int(r["gated_depth"]):
+                  fail.append(f"seed {r['seed']}: sterility credited without the gate binding")
+                  break
+
+          if fail:
+              print("\nFAILED:", *fail, sep="\n  ")
+              sys.exit(1)
+          print(f"\nthe map holds over {len(seeds)} seeds")
           PY
 
   wasm:

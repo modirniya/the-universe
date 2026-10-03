@@ -59,8 +59,9 @@ out otherwise, and the ensemble column says how often it did not.
 | A chain can end for want of life with budget in hand | `bootloader` | follows from rules | The gate forbids a sterile layer to seed; that it binds before space did in 8/20 permissive seeds had to be run. |
 | Bootloaders never change what a child receives | `bootloader` | follows from rules | The child's seed is hashed from the horizon alone; the ablation confirms it in 40/40 chains. |
 | Same seed, same universe, on two targets | `golden` | had to be run | One fingerprint, asserted natively and on WebAssembly. |
+| Sterility alone ends a chain only with rich children and a low size floor | `bootloader` | had to be run | At most 4 of 10 seeds in any cell, and never the commonest ending. |
 
-Of the 24 rows, 13 follow from the rules and 11 had to be run. The second half
+Of the 25 rows, 13 follow from the rules and 12 had to be run. The second half
 is what this repository has to offer. The first half is worth keeping because
 it shows the framework's ideas can be built at all, which is the coherence
 claim and nothing more.
@@ -104,6 +105,7 @@ cargo run --release -- pipe --config configs/pipe.toml      # Theory 3: what sur
 cargo run --release -- detect --config configs/detect.toml  # Detection: which limits are findable
 cargo run --release -- sweep  --config configs/sweep.toml   # Theory 6: how narrow the band is
 cargo run --release -- boot   --config configs/boot.toml    # Theory 5: a chain booted from inside
+cargo run --release -- edge   --config configs/edge.toml    # Theories 2 and 5: where chains die
 ```
 
 **Every documented config runs an ensemble of 20 universes.** Seed 42 runs
@@ -119,7 +121,7 @@ under a second each. `configs/quick.toml` is a much smaller world for iterating
 on code — too short to draw conclusions from, and a single seed.
 
 ```sh
-cargo test --workspace              # 238 tests, most of them on the physics
+cargo test --workspace              # 248 tests, most of them on the physics
 cargo run --release -- --help
 ```
 
@@ -660,6 +662,41 @@ attached to the chain, not a mechanism inside it. The sterility limit is real,
 and it is a limit the framework chose to impose rather than one the dynamics
 produce. The gate stays, because it is the framework's rule, and it is now
 labelled as one.
+
+**Where a chain dies.** Which limit ends a chain depends on two floors: how
+much of its host's budget a child gets, and how small a world may be. So the
+chain was run across a grid of both, with and without the gate, holding the
+work floor at the shipped chain's 100000. A cell is called sterile only where
+the ungated chain went deeper.
+
+```sh
+cargo run --release -- edge --config configs/edge.toml
+```
+
+```
+seed 42:
+  floor\frac  0.10 0.15 0.20 0.25 0.30 0.40 0.50
+      edge 2     $    $    s    $    $    s    S
+      edge 8     $    $    s    $    $    s    S
+     edge 12     #    $    #    $    #    #    s
+     edge 16     #    #    #    #    #    #    #
+
+seeds in which sterility alone stopped the chain, out of 10:
+  floor\frac  0.10 0.15 0.20 0.25 0.30 0.40 0.50
+      edge 2     0    0    0    0    0    2    4
+      edge 8     0    0    0    0    0    2    4
+     edge 12     0    0    0    0    0    0    0
+
+  $ budget   # space   S sterility alone   s sterile, but tied with another limit
+```
+
+Rows for edges 4 and 6 match edge 2, and edge 24 matches edge 16. Poor
+children die of poverty, and a high size floor ends chains on space. Sterility
+alone binds only in one corner, where children are rich and tiny worlds are
+allowed, and even there in at most 4 seeds of 10. It is never the commonest
+ending in any cell. Seed 42 shows it in that corner, which is the fourth time
+in this README the pinned seed made a finding look stronger than the ensemble
+does. Sterility is a real limit on depth in this model, and a rare one.
 
 **What this is not.** A bootloader here is a precondition, not an achievement.
 Nothing in this model builds a computer. It shows that the transport such a

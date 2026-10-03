@@ -20,6 +20,7 @@ USAGE:
     the-universe detect --config <FILE> [OPTIONS]
     the-universe sweep --config <FILE> [OPTIONS]
     the-universe boot  --config <FILE> [OPTIONS]
+    the-universe edge  --config <FILE> [OPTIONS]
 
 COMMANDS:
     run     Compare an unconstrained universe against one with each limit in
@@ -47,6 +48,11 @@ COMMANDS:
             parent's horizon, and report where the chain stops -- for want of
             budget, or for want of anything alive enough to boot with.
             (Theory 5: bootloader life.)
+
+    edge    Run the boot chain across a grid of degradation fractions and
+            size floors, with and without the bootloader gate, and map why
+            each chain stopped: budget, space, or sterility alone.
+            (Theories 2 and 5: where poverty and sterility meet.)
 
 OPTIONS:
     --config <FILE>   Universe definition (TOML). Required.
@@ -109,6 +115,8 @@ enum Command {
     Sweep,
     /// Theory 5: a chain booted from inside, layer by layer.
     Boot,
+    /// Theories 2 and 5: where a chain dies of poverty and where of sterility.
+    Edge,
 }
 
 /// `Ok(None)` means help was requested.
@@ -127,9 +135,10 @@ fn parse(argv: Vec<String>) -> Result<Option<Args>, String> {
         "detect" => Command::Detect,
         "sweep" => Command::Sweep,
         "boot" => Command::Boot,
+        "edge" => Command::Edge,
         other => {
             return Err(format!(
-                "unknown command `{other}`; the commands are `run`, `nest`, `pipe`, `detect`, `sweep` and `boot`"
+                "unknown command `{other}`; the commands are `run`, `nest`, `pipe`, `detect`, `sweep`, `boot` and `edge`"
             ));
         }
     };
@@ -180,7 +189,7 @@ fn parse(argv: Vec<String>) -> Result<Option<Args>, String> {
                 );
             }
             "--budget" => {
-                if !matches!(command, Command::Nest | Command::Boot) {
+                if !matches!(command, Command::Nest | Command::Boot | Command::Edge) {
                     return Err("`--budget` applies to `nest` and `boot`, not `run`".into());
                 }
                 let v = value()?;
@@ -237,6 +246,7 @@ fn execute(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
         Command::Detect => execute_detect(&cfg, &out_dir),
         Command::Sweep => execute_sweep(&cfg, &out_dir, args.steps),
         Command::Boot => execute_boot(&cfg, &out_dir, args.budget),
+        Command::Edge => execute_edge(&cfg, &out_dir, args.budget),
     }
 }
 
@@ -259,6 +269,36 @@ fn print_ensemble(summary: String, written: std::io::Result<PathBuf>) -> std::io
     println!();
     print!("{summary}");
     println!("\nwrote {}", written?.display());
+    Ok(())
+}
+
+fn execute_edge(
+    cfg: &Config,
+    out_dir: &Path,
+    budget_override: Option<u64>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let root_spec = layer::LayerSpec {
+        width: cfg.world.width,
+        height: cfg.world.height,
+        ticks: cfg.world.ticks,
+    };
+    let root_budget = Budget::new(
+        budget_override.unwrap_or_else(|| layer::predict_work(&root_spec, &cfg.observer, cfg)),
+    );
+    println!(
+        "root universe: {}x{} base cells, {} ticks, seed {}; viable_work held at {}\n",
+        cfg.world.width, cfg.world.height, cfg.world.ticks, cfg.world.seed, cfg.nesting.viable_work
+    );
+
+    let cells = bootloader::map_endings(cfg, root_budget);
+    print!("{}", report::edge_summary(&cells));
+
+    let runs = with_rest(cfg, cells, |c| bootloader::map_endings(c, root_budget));
+    if runs.len() > 1 {
+        println!();
+        print!("{}", report::edge_ensemble_summary(&runs));
+    }
+    println!("\nwrote {}", report::write_edge(&runs, out_dir)?.display());
     Ok(())
 }
 

@@ -36,6 +36,14 @@
 //! shows the result: the gate can shorten a chain, and never changes a layer.
 //! That is the framework's rule, and the module says so rather than presenting
 //! it as something the dynamics produced.
+//!
+//! # Where a chain dies
+//!
+//! [`map_endings`] runs the chain over a grid of degradation fractions and
+//! size floors, each with and without the gate, and classifies each ending
+//! with [`Ending::of`]. Sterility is credited only where the ungated chain went
+//! deeper, because a chain's own `ended_because` names sterility even when
+//! another limit would have stopped it at the same depth.
 
 use crate::budget::{Budget, Degradation};
 use crate::config::Config;
@@ -512,6 +520,128 @@ fn scale_horizon(
     }
 }
 
+// ---------------------------------------------------------------------------
+// Where a chain dies: the boundary between poverty and sterility
+// ---------------------------------------------------------------------------
+
+/// Why a chain stopped, classified with the gate ablation so that sterility
+/// is only credited where it alone was binding.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Ending {
+    /// The next budget fell below what a universe costs.
+    Budget,
+    /// No world small enough was still viable.
+    Space,
+    /// Nothing cleared the logging threshold.
+    Threshold,
+    /// The last layer was sterile, and without the gate the chain would have
+    /// gone deeper: sterility alone stopped it.
+    Sterile,
+    /// The last layer was sterile, but without the gate the chain stops at the
+    /// same depth anyway. The chain's own label says sterility; it is a tie.
+    Tied,
+}
+
+impl Ending {
+    pub fn glyph(&self) -> char {
+        match self {
+            Ending::Budget => '$',
+            Ending::Space => '#',
+            Ending::Threshold => '~',
+            Ending::Sterile => 'S',
+            Ending::Tied => 's',
+        }
+    }
+
+    /// One word per ending, for CSV and for CI.
+    pub fn code(&self) -> &'static str {
+        match self {
+            Ending::Budget => "budget",
+            Ending::Space => "space",
+            Ending::Threshold => "threshold",
+            Ending::Sterile => "sterile",
+            Ending::Tied => "tied",
+        }
+    }
+
+    pub fn label(&self) -> &'static str {
+        match self {
+            Ending::Budget => "budget",
+            Ending::Space => "space",
+            Ending::Threshold => "threshold",
+            Ending::Sterile => "sterile",
+            Ending::Tied => "sterile, tied with another limit",
+        }
+    }
+
+    /// Classify a chain from its gated and ungated runs.
+    pub fn of(gated: &BootChain, ungated: &BootChain) -> Ending {
+        let sterile_stop = gated.layers.last().is_some_and(|l| !l.survey.can_boot());
+        if sterile_stop {
+            return if ungated.depth() > gated.depth() {
+                Ending::Sterile
+            } else {
+                Ending::Tied
+            };
+        }
+        match gated.ended_because {
+            r if r.starts_with("the budget") => Ending::Budget,
+            r if r.starts_with("nothing cleared") => Ending::Threshold,
+            _ => Ending::Space,
+        }
+    }
+}
+
+/// Degradation fractions the boundary map sweeps, poorest children first.
+pub const EDGE_FRACTIONS: &[f64] = &[0.1, 0.15, 0.2, 0.25, 0.3, 0.4, 0.5];
+/// Smallest viable world edges it sweeps, most permissive first.
+pub const EDGE_FLOORS: &[usize] = &[2, 4, 6, 8, 12, 16, 24];
+
+/// One cell of the map.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct EdgeCell {
+    pub fraction: f64,
+    pub viable_edge: usize,
+    pub gated_depth: usize,
+    pub ungated_depth: usize,
+    pub ending: Ending,
+}
+
+/// How a chain ends across the degradation fraction and the size floor.
+///
+/// `viable_work` is taken from the config and held fixed; the two swept floors
+/// are the ones that trade poverty against sterility. Each cell runs the chain
+/// with and without the bootloader gate, so a cell is called sterile only when
+/// the gate was the sole reason it stopped.
+pub fn map_endings(cfg: &Config, root_budget: Budget) -> Vec<EdgeCell> {
+    let mut out = Vec::with_capacity(EDGE_FRACTIONS.len() * EDGE_FLOORS.len());
+    for &viable_edge in EDGE_FLOORS {
+        for &fraction in EDGE_FRACTIONS {
+            out.push(ending_at(cfg, root_budget, fraction, viable_edge));
+        }
+    }
+    out
+}
+
+/// One cell of the map: the chain at one fraction and one size floor, run
+/// with and without the gate.
+pub fn ending_at(cfg: &Config, root_budget: Budget, fraction: f64, viable_edge: usize) -> EdgeCell {
+    let deg = Degradation {
+        fraction,
+        viable_work: cfg.nesting.viable_work,
+        viable_edge,
+    };
+    let gated = run_boot_chain_with(cfg, root_budget, &deg, Gate::Bootloader, |_, _| {});
+    let ungated = run_boot_chain_with(cfg, root_budget, &deg, Gate::Open, |_, _| {});
+    EdgeCell {
+        fraction,
+        viable_edge,
+        gated_depth: gated.depth(),
+        ungated_depth: ungated.depth(),
+        ending: Ending::of(&gated, &ungated),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -738,5 +868,22 @@ mod tests {
         let b = [Message::pack(1, 0.4, 100, 128)];
         assert_ne!(boot_seed(&a), boot_seed(&b));
         assert_eq!(boot_seed(&a), boot_seed(&a));
+    }
+
+    #[test]
+    fn every_ending_has_its_own_code_and_glyph() {
+        let all = [
+            Ending::Budget,
+            Ending::Space,
+            Ending::Threshold,
+            Ending::Sterile,
+            Ending::Tied,
+        ];
+        for (i, a) in all.iter().enumerate() {
+            for b in &all[i + 1..] {
+                assert_ne!(a.code(), b.code());
+                assert_ne!(a.glyph(), b.glyph());
+            }
+        }
     }
 }

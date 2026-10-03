@@ -11,7 +11,7 @@
 //! output format is part of the claim, so it is worth being able to read the
 //! code that produces it.
 
-use crate::bootloader::{BootChain, BootLayer};
+use crate::bootloader::{BootChain, BootLayer, EdgeCell, Ending};
 use crate::detector::Finding;
 use crate::experiment::{self, Comparison, Ensemble, Experiment, Spread};
 use crate::layer::Chain;
@@ -2287,6 +2287,144 @@ pub fn write_boot_ensemble(runs: &[(u64, BootChain)], out_dir: &Path) -> io::Res
         }
     }
     write_rows(out_dir, csv)
+}
+
+// ---------------------------------------------------------------------------
+// Where a chain dies
+// ---------------------------------------------------------------------------
+
+const ENDINGS: &[Ending] = &[
+    Ending::Budget,
+    Ending::Space,
+    Ending::Threshold,
+    Ending::Sterile,
+    Ending::Tied,
+];
+
+fn edge_grid(cells: &[EdgeCell], glyph: impl Fn(&EdgeCell) -> char) -> String {
+    let mut s = String::new();
+    let _ = write!(s, "{:>12} ", "floor\\frac");
+    for f in crate::bootloader::EDGE_FRACTIONS {
+        let _ = write!(s, "{:>5.2}", f);
+    }
+    s.push('\n');
+    for &edge in crate::bootloader::EDGE_FLOORS {
+        let _ = write!(s, "{:>12} ", format!("edge {edge}"));
+        for &f in crate::bootloader::EDGE_FRACTIONS {
+            let c = cells
+                .iter()
+                .find(|c| c.viable_edge == edge && c.fraction == f)
+                .map_or('?', &glyph);
+            let _ = write!(s, "{:>5}", c);
+        }
+        s.push('\n');
+    }
+    s
+}
+
+fn edge_legend() -> String {
+    let parts: Vec<String> = ENDINGS
+        .iter()
+        .map(|e| format!("{} {}", e.glyph(), e.label()))
+        .collect();
+    format!("  {}\n", parts.join("   "))
+}
+
+pub fn edge_summary(cells: &[EdgeCell]) -> String {
+    let mut s = String::from(
+        "why each chain stopped, by degradation fraction (columns) and smallest viable\n\
+         world edge (rows). sterility counts only where the gate alone stopped the chain.\n\n",
+    );
+    s.push_str(&edge_grid(cells, |c| c.ending.glyph()));
+    s.push('\n');
+    s.push_str(&edge_legend());
+    s.push('\n');
+    for e in ENDINGS {
+        let k = cells.iter().filter(|c| c.ending == *e).count();
+        if k > 0 {
+            let _ = writeln!(s, "{:>3}/{}  {}", k, cells.len(), e.label());
+        }
+    }
+    s
+}
+
+pub fn write_edge(runs: &[(u64, Vec<EdgeCell>)], out_dir: &Path) -> io::Result<PathBuf> {
+    std::fs::create_dir_all(out_dir)?;
+    let mut csv = String::from("seed,fraction,viable_edge,gated_depth,ungated_depth,ending\n");
+    for (seed, cells) in runs {
+        for c in cells {
+            let _ = writeln!(
+                csv,
+                "{seed},{:.2},{},{},{},{}",
+                c.fraction,
+                c.viable_edge,
+                c.gated_depth,
+                c.ungated_depth,
+                c.ending.code()
+            );
+        }
+    }
+    let path = out_dir.join("edge.csv");
+    std::fs::write(&path, csv)?;
+    Ok(path)
+}
+
+/// Across seeds: the commonest ending in each cell, and how often sterility
+/// alone was binding there.
+pub fn edge_ensemble_summary(runs: &[(u64, Vec<EdgeCell>)]) -> String {
+    let mut s = String::new();
+    let seeds: Vec<u64> = runs.iter().map(|(s, _)| *s).collect();
+    let n = runs.len();
+    ensemble_header(&mut s, &seeds);
+    let Some((_, first)) = runs.first() else {
+        return s;
+    };
+    let at = |i: usize| runs.iter().filter_map(move |(_, cells)| cells.get(i));
+    let commonest: Vec<EdgeCell> = first
+        .iter()
+        .enumerate()
+        .map(|(i, c)| {
+            let best = ENDINGS
+                .iter()
+                .max_by_key(|e| {
+                    (
+                        at(i).filter(|x| x.ending == **e).count(),
+                        std::cmp::Reverse(**e),
+                    )
+                })
+                .copied()
+                .unwrap_or(c.ending);
+            EdgeCell { ending: best, ..*c }
+        })
+        .collect();
+    s.push_str("\ncommonest ending in each cell:\n\n");
+    s.push_str(&edge_grid(&commonest, |c| c.ending.glyph()));
+    s.push('\n');
+    s.push_str(&edge_legend());
+
+    let sterile_share: Vec<EdgeCell> = first.to_vec();
+    s.push_str(
+        "\nseeds in which sterility alone stopped the chain, in tenths (0-9, + for all):\n\n",
+    );
+    let idx = |c: &EdgeCell| first.iter().position(|x| x == c).unwrap_or(0);
+    s.push_str(&edge_grid(&sterile_share, |c| {
+        let k = at(idx(c)).filter(|x| x.ending == Ending::Sterile).count();
+        if k == n {
+            '+'
+        } else {
+            char::from_digit((k * 10 / n.max(1)) as u32, 10).unwrap_or('?')
+        }
+    }));
+    let any = (0..first.len())
+        .filter(|&i| at(i).any(|x| x.ending == Ending::Sterile))
+        .count();
+    let _ = writeln!(
+        s,
+        "\nsterility alone stopped the chain somewhere in {any}/{} cells, in at least one seed",
+        first.len()
+    );
+    s.push_str(ENSEMBLE_CLOSER);
+    s
 }
 
 #[cfg(test)]
