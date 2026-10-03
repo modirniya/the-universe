@@ -176,7 +176,18 @@ def artifact_value(out: Path, check: dict):
             raise KeyError(f"no row matching {where} in {path}")
         col = check["column"]
         agg = check.get("aggregate", "first")
-        vals = [float(r[col]) if r[col] not in ("", "NaN", "true", "false") else r[col] for r in rows]
+        if agg == "count":
+            return len(rows)
+        if agg == "count_true":
+            return sum(1 for r in rows if r[col] == "true")
+
+        def parse(v: str):
+            try:
+                return float(v)
+            except ValueError:
+                return v
+
+        vals = [parse(r[col]) for r in rows]
         if agg == "first":
             return vals[0]
         nums = [v for v in vals if isinstance(v, float)]
@@ -186,10 +197,6 @@ def artifact_value(out: Path, check: dict):
             return min(nums)
         if agg == "max":
             return max(nums)
-        if agg == "count_true":
-            return sum(1 for r in rows if r[col] == "true")
-        if agg == "count":
-            return len(rows)
         raise ValueError(f"unknown aggregate {agg}")
     raise ValueError(f"cannot read {path.suffix}")
 
