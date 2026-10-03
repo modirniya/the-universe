@@ -141,6 +141,11 @@ impl CoarseRule {
             CoarseRule::Frozen => "frozen",
         }
     }
+
+    /// The inverse of [`Self::label`].
+    pub fn parse(name: &str) -> Option<CoarseRule> {
+        CoarseRule::ALL.into_iter().find(|r| r.label() == name)
+    }
 }
 
 /// The magnitudes behind the toggles. These are the creator's dials; the
@@ -298,6 +303,14 @@ mod tests {
         let labels: std::collections::BTreeSet<&str> =
             CoarseRule::ALL.iter().map(|r| r.label()).collect();
         assert_eq!(labels.len(), 3);
+    }
+
+    #[test]
+    fn labels_round_trip_through_parse() {
+        for r in CoarseRule::ALL {
+            assert_eq!(CoarseRule::parse(r.label()), Some(r));
+        }
+        assert_eq!(CoarseRule::parse("nonsense"), None);
     }
 
     #[test]

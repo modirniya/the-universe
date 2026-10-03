@@ -15,7 +15,7 @@
 <div class="wrap">
 
   <header class="masthead">
-    <p class="eyebrow">the-universe · v0.7 <span>executable philosophy</span></p>
+    <p class="eyebrow">the-universe · v1.0 <span>a computational investigation</span></p>
     <h1>A universe with its <em>optimizations</em> exposed</h1>
     <p class="standfirst">
       Physical limits, on this framework's reading, are not fundamental truths but
@@ -36,9 +36,15 @@
         <span><i class="sw sw-collapse"></i>collapsed</span>
       </div>
       <p class="shading-note">
-        Grainy ground is being computed cell by cell. Smooth ground is not being
-        computed at all — it is one number standing in for a whole region, and it
-        only becomes cells when the probe arrives.
+        Grainy ground is being computed cell by cell. Smooth ground is not computed
+        cell by cell: one number stands in for the whole region and advances under
+        the closure chosen in the panel. It only becomes cells when the probe arrives.
+      </p>
+      <p class="shading-note">
+        <strong>This page is a visualisation, not an experiment.</strong> Nothing
+        shown here is a published number. Every figure the project claims comes from
+        the deterministic experiment runner (<code>scripts/reproduce.sh</code>) and is
+        recorded in <code>analysis/claims.toml</code> with the commit that produced it.
       </p>
     </section>
 
@@ -89,6 +95,22 @@
       </div>
 
       <div class="group">
+        <h2>Unobserved ground</h2>
+        <p class="hint">
+          What stands in for a region nothing is looking at is an <em>assumption</em>
+          of the model, not a consequence of the theory. Three closures are
+          implemented; the experiments run every lazy setting under each.
+        </p>
+        <label class="field"><span>Closure</span>
+          <select id="closure">
+            <option value="binomial" selected>binomial — the rule averaged over a binomial neighbour count (default)</option>
+            <option value="frozen">frozen — the density is held; nothing is computed</option>
+            <option value="indicator">indicator — the rule's indicator on the neighbour mean (v0.1–v0.9)</option>
+          </select>
+        </label>
+      </div>
+
+      <div class="group">
         <h2>The input event</h2>
         <p class="hint">The seed is the creator's only necessary intervention. Same seed, same universe.</p>
         <label class="field"><span>Seed</span><input id="seed" type="number" value="42" min="0" step="1"></label>
@@ -116,6 +138,25 @@
         </p>
       </div>
 
+      <div class="group" id="experimentGroup">
+        <h2>What you are watching</h2>
+        <p class="hint">
+          The universe on screen, as the configuration the command-line runner would
+          need to reproduce it, and the source revision this page was built from. The
+          runner adds ensembles, nulls and controls; this page shows one universe.
+        </p>
+        <pre class="config" id="configText">…</pre>
+        <dl class="readouts">
+          <div><dt>source commit</dt><dd id="r-commit">…</dd></div>
+          <div><dt>crate version</dt><dd id="r-version">…</dd></div>
+          <div><dt>world fingerprint</dt><dd id="r-fingerprint">…</dd></div>
+        </dl>
+        <p class="hint">
+          The fingerprint is the whole state folded into one number; two viewers at
+          the same tick with the same configuration see the same one.
+        </p>
+      </div>
+
       <div class="group" id="goldenGroup">
         <h2>Same seed, same universe</h2>
         <p class="hint">
@@ -138,7 +179,9 @@
       <p>
         <strong>What this shows:</strong> that these ideas are <em>coherent</em> — that
         they can be made to work together in something that runs and produces
-        measurable results.
+        measurable results — and, through the experiments the page links to, which
+        of the framework's consequences hold in this model, which depend on its
+        implementation choices, and which do not hold at all.
       </p>
       <p>
         <strong>What it does not show:</strong> that our universe works this way. Every
@@ -149,6 +192,8 @@
     </div>
     <p class="colophon">
       <a href="https://github.com/modirniya/the-universe">github.com/modirniya/the-universe</a>
+      · <a href="https://github.com/modirniya/the-universe/blob/main/analysis/claims.toml">claims ledger</a>
+      · <a href="https://github.com/modirniya/the-universe/blob/main/docs/audit.md">audit</a>
       · Parham Modirniya · MIT OR Apache-2.0
     </p>
   </footer>

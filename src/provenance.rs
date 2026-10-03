@@ -45,6 +45,14 @@ pub fn experiment_version(command: &str) -> u32 {
 /// statistic's definition changes (not when a new one is added).
 pub const METRIC_VERSION: u32 = 2;
 
+/// The source revision this binary was built from, as `build.rs` recorded it.
+/// Exposed so the browser build can show the same identity the CLI records.
+pub const COMMIT: &str = env!("UNIVERSE_GIT_COMMIT");
+/// Whether the tree had uncommitted changes at build time: "true", "false" or
+/// "unknown".
+pub const DIRTY: &str = env!("UNIVERSE_GIT_DIRTY");
+pub const CRATE_VERSION: &str = env!("CARGO_PKG_VERSION");
+
 /// Everything recorded about a run.
 #[derive(Clone, Debug)]
 pub struct Provenance {
@@ -81,9 +89,9 @@ impl Provenance {
             config_text: config_text.to_string(),
             config_fingerprint: fingerprint_text(config_text),
             seeds: ensemble_seeds(cfg),
-            crate_version: env!("CARGO_PKG_VERSION"),
-            commit: env!("UNIVERSE_GIT_COMMIT"),
-            dirty: env!("UNIVERSE_GIT_DIRTY"),
+            crate_version: CRATE_VERSION,
+            commit: COMMIT,
+            dirty: DIRTY,
             rustc: env!("UNIVERSE_RUSTC"),
             target: env!("UNIVERSE_TARGET"),
             profile: env!("UNIVERSE_PROFILE"),

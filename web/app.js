@@ -6,7 +6,7 @@
 // that reimplemented a cheap version of the laws for the browser would be
 // showing a different universe from the one the findings describe.
 
-import init, { Sim, golden_fingerprint, golden_expected } from './pkg/universe_web.js';
+import init, { Sim, golden_fingerprint, golden_expected, source_commit, crate_version } from './pkg/universe_web.js';
 
 // Default world. Deliberately smaller than the 128x128 the CLI experiments use:
 // this one has to stay smooth in a tab while a person fiddles with it, and the
@@ -171,6 +171,9 @@ function updateReadouts() {
   el('r-live-bytes').textContent = bytes(sim.live_state_bytes());
   el('r-alloc-bytes').textContent = bytes(sim.allocated_bytes());
 
+  el('r-fingerprint').textContent = sim.fingerprint();
+  el('configText').textContent = sim.config_toml();
+
   el('coupling').textContent = sim.influence_speed().toFixed(2);
   const [, timeOn, speedOn] = limits();
   const pinned = [speedOn ? 'the speed cap' : null, timeOn ? 'discrete time' : null].filter(Boolean);
@@ -272,6 +275,11 @@ function wire() {
   el('substeps').addEventListener('input', applyDials);
   el('radius').addEventListener('input', applyDials);
 
+  el('closure').addEventListener('change', (e) => {
+    sim.set_coarse_rule(e.target.value);
+    restart();
+  });
+
   el('seed').addEventListener('change', (e) => {
     const v = Number(e.target.value);
     sim.set_seed(Number.isFinite(v) && v >= 0 ? v : 42);
@@ -301,6 +309,7 @@ function wire() {
       bw,
       bh,
     );
+    updateReadouts();
     draw();
   });
 
@@ -344,6 +353,8 @@ async function main() {
   sim = new Sim(BASE, BASE, 42, 0.3, BLOCK);
   wire();
   showGolden();
+  el('r-commit').textContent = source_commit().slice(0, 12) + (source_commit().includes('dirty') ? ' (dirty tree)' : '');
+  el('r-version').textContent = crate_version();
   updateReadouts();
   syncDialState();
   requestAnimationFrame(frame);
