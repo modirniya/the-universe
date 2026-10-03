@@ -8,7 +8,7 @@ Open-source **executable philosophy**: a runnable model of a simulation-hypothes
 
 **Honest framing, which is a deliverable and not a disclaimer:** running this proves the ideas are *coherent*, not that our universe works this way. The model makes falsifiable predictions only about its own behaviour. Any summary the code prints must decline to overstate the result (`report::verdict` ends with this and a test enforces it). Philosophy that can't be coded lives in `docs/philosophy.md`, not in the code.
 
-v0.1 through v0.7 are complete: the six theories, plus a WebAssembly build and a browser viewer.
+v0.1 through v0.9 are complete: the six theories, a WebAssembly build and browser viewer (v0.7), the analysis shell (v0.8), and an ensemble-and-ablation pass that tests what the first six showed (v0.9).
 
 ## Layout
 
@@ -42,12 +42,13 @@ cargo fmt
 
 CLI overrides: `--seed <N>`, `--ticks <N>`, `--seeds <N>`, `--out <DIR>`.
 
-**Ensembles.** Every documented config sets `world.seeds = 20`. The pinned seed
+**Ensembles.** Every documented config sets `world.seeds = 20`, except
+`configs/edge.toml` at 10, because each of its seeds runs 98 chains. The pinned seed
 (42) runs alone first and prints in full; the rest run in parallel via
 `experiment::per_seed` and are summarised as `mean [min, max]`, written to
 `ensemble.csv` (and `ensemble.json` for `run`). Wall time is never reported for
 parallel members. A README number quoted from seed 42 must say so, and a claim
-must state its ensemble share. Seed 42 turned out to be an outlier on three
+must state its ensemble share. Seed 42 turned out to be an outlier on four
 findings; do not quote it alone again.
 
 CI (`.github/workflows/ci.yml`) runs fmt, clippy and tests on Linux, tests on
@@ -60,7 +61,7 @@ Always benchmark with `--release`; debug builds are close to 20× slower (18.7×
 
 ## Architecture
 
-Single crate. Module names match theory names — this is deliberate and load-bearing, since the code is meant to self-document the philosophy. Do not rename a module to something more conventional.
+Module names in `universe-core` match theory names — this is deliberate and load-bearing, since the code is meant to self-document the philosophy. Do not rename a module to something more conventional.
 
 | Module | Role |
 | --- | --- |
@@ -69,13 +70,13 @@ Single crate. Module names match theory names — this is deliberate and load-be
 | `physics` | Pure update rules; `step` and `tick` |
 | `observer` | `Probe`, and the render/collapse events |
 | `rng` | SplitMix64, hand-written; the creator's input channel |
-| `experiment` | Runs each constraint setting, computes cost ratios and divergences |
+| `experiment` | Runs each constraint setting, computes cost ratios and divergences; `per_seed` and `Spread` run and summarise every ensemble |
 | `budget` | Degradation rule; closed-form depth bound |
 | `layer` | Nesting: sizes each layer to its budget, runs the chain |
-| `pipe` | Horizon, serialization, `WriteEnd`/`ReadEnd`, logging threshold |
-| `detector` | Inhabitant measurements; which limits are findable from inside |
-| `sweep` | Fine-tuning: scores each rule setting, counts distinct laws |
-| `bootloader` | Cluster tracking, bootloader detection, the boot chain |
+| `pipe` | Horizon, serialization, `WriteEnd`/`ReadEnd`, logging threshold; channel width (`Horizon::bits`) and the width sweep |
+| `detector` | Inhabitant measurements; which limits are findable from inside; `isotropy` reads the lattice's shape |
+| `sweep` | Fine-tuning: scores each rule setting, counts distinct laws; `run_sensitivity` scores all four constants under three criteria |
+| `bootloader` | Cluster tracking, bootloader detection, the boot chain; `Gate` ablation and the `edge` map of why chains end |
 | `golden` | The pinned reference universe and its fingerprint |
 | `report` | CSV, JSON, printed summary and verdict |
 | `config` | TOML loading and validation |
@@ -120,7 +121,7 @@ Recorded because they are results of the model, not assumptions fed into it:
 From v0.2:
 
 - A chain's total cost is bounded by `root / (1 - fraction)` — 1.33× the root layer at the default fraction. Nesting is bounded in total spend, not just depth.
-- (v0.8 ensemble) The deepest layer is calmer than the root in 20/20 seeds; the step-by-step decline holds in only 11/20. The "~10× per layer" below was seed 42 alone.
+- (v0.9 ensemble) The deepest layer is calmer than the root in 20/20 seeds; the step-by-step decline holds in only 11/20. The "~10× per layer" below was seed 42 alone.
 - The shipped chain **dies of the spatial floor, not the budget floor**: the closed form allowed 4 layers, the chain built 3.
 - Churn falls ~10× per layer *at seed 42 only* (see the ensemble line above). The measure is biased *against* finding a decline (a fixed 16×16 macro grid makes small worlds look noisier), so the root-to-deepest decline is if anything understated.
 - `Degradation::max_depth` is an **upper bound**, not an equality: integer flooring at each generation costs real chains depth.
@@ -173,9 +174,11 @@ From v0.3:
 
 **The original roadmap is complete**: v0.1 (limits as optimizations), v0.2 (nesting and degradation), v0.3 (the pipe), v0.4 (detection), v0.5 (fine-tuning sweep), v0.6 (bootloader life).
 
-Done in phase 2: v0.7 (workspace split, WebAssembly, the viewer, Pages deploy). The Python notebook shell is v0.8. The research track — seeded replicators, evolution — stays deliberately unscheduled. Also later: Python notebook shell for analysing output, visuals, WASM build.
+Done in phase 2: v0.7 (workspace split, WebAssembly, the viewer, Pages deploy), v0.8 (the Python analysis shell), and v0.9 (seed ensembles, the gate and channel-width ablations, the fine-tuning sensitivity analysis, lattice-shape detection, the `edge` map, and the README's "What had to be run" table). v0.9 added no theory; it tested the claims of the first six.
 
-This order is firm. Finish a milestone before starting the next, and do not widen the current one to include the next even where they touch — layers currently cannot reach each other, and that omission belongs to the pipe milestone, not this one.
+The research track — seeded replicators, evolution — stays deliberately unscheduled. It is also where Theory 5 would have to go to mean more than it does now: bootloaders decide whether a child universe exists, never what it is.
+
+This order is firm. Finish a milestone before starting the next, and do not widen the current one to include the next even where they touch.
 
 ## Vocabulary — use consistently in code and docs
 
