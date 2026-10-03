@@ -35,6 +35,7 @@ substeps = 2         # physics substeps per tick when time is not discrete
 capped_radius = 1    # influence radius with the speed cap in force
 uncapped_radius = 3  # influence radius without it
 block_size = 16      # edge of a lazily rendered region, in base cells
+coarse_rule = "binomial"  # what stands in for unobserved ground: binomial (mean field), indicator (v0.9), or frozen
 
 # The probe: a fixed window, unmoving for the whole run. Holding observation
 # constant keeps the cost difference attributable to the optimization.

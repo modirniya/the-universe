@@ -5,18 +5,24 @@ knowing what it is before you spend time on it.
 
 ## What this project is
 
-It is an argument written as a program. Each module implements one theory from
-[`docs/philosophy.md`](docs/philosophy.md), and running the code demonstrates
-that those theories are **coherent** — that they can be made to work together
-in a system that executes and produces measurable results.
+It is a computational investigation of a framework written as a program. Each
+module implements one theory from [`docs/philosophy.md`](docs/philosophy.md),
+and the experiments measure, with controls and replication, which of the
+framework's consequences hold in the toy, which depend on how it was built,
+and which do not hold at all.
 
 It does **not** claim our universe works this way, and no contribution should
-imply that it does. The model makes falsifiable predictions only about its own
-behaviour. If a change would make the README or the printed summary sound more
-confident than that, it is the wrong change no matter how good the code is.
+imply that it does. If a change would make the README or a printed summary
+sound more confident than the artifacts allow, it is the wrong change no
+matter how good the code is. When a claim must change, weaken the claim rather
+than strengthen the rhetoric; an inconvenient result is kept, not smoothed.
 
-Philosophy that cannot be coded belongs in `docs/philosophy.md`, not in the
-source.
+Every claim lives in `analysis/claims.toml` with its category (definition,
+consequence, computational finding, physical hypothesis), its experiment, its
+seeds, its controls and the artifact ranges that must hold. A change to a claim
+is a change to the ledger and the README together, and `analysis/ledger.py`
+checks that they agree. Philosophy that cannot be coded belongs in
+`docs/philosophy.md`, not in the source.
 
 ## Getting set up
 
@@ -30,9 +36,10 @@ cargo run --release -- run --config configs/quick.toml
 ```
 
 `configs/quick.toml` is a small world for iterating. `configs/default.toml` is
-the real experiment and takes about 11 seconds on an M1 Air. Always benchmark
-with `--release`; debug builds are close to 20× slower (18.7× on
-`configs/quick.toml`, M1) and the numbers become meaningless.
+the real Theory 1 experiment and takes a few minutes on four cores;
+`scripts/reproduce.sh` runs everything in about an hour. Always benchmark with
+`--release`; debug builds are close to 20× slower and the numbers become
+meaningless.
 
 Before opening a PR:
 
@@ -42,8 +49,9 @@ cargo clippy --all-targets -- -D warnings
 cargo test
 ```
 
-CI runs exactly these, plus the tests on macOS ARM64, plus a job that runs the
-documented experiment and checks the README's reproducible claims still hold.
+CI runs exactly these, plus the tests on macOS ARM64, the WebAssembly
+fingerprint, and a job that reproduces every published table and checks the
+ledger's ranges against the fresh artifacts.
 
 ## The five rules
 

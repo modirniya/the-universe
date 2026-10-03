@@ -21,15 +21,21 @@
 //! - [`space`] — discrete space, and two-fidelity storage
 //! - [`physics`] — the laws, as pure functions
 //! - [`observer`] — probes, and the render/collapse events
-//! - [`experiment`] — the benchmark that compares constrained to unconstrained
+//! - [`observables`] — what an outside observer can measure, as a vector
+//! - [`experiment`] — running one universe, and running many
+//! - [`limits`] — Theory 1 as a factorial experiment against four nulls
 //! - [`layer`] — nesting: layers hosting layers, each poorer than its host
 //! - [`pipe`] — the one-way serializing channel between layers
+//! - [`information`] — what crosses the pipe, in bits, per task and encoding
 //! - [`detector`] — whether an inhabitant can find the limits from inside
 //! - [`sweep`] — fine-tuning: how narrow the productive band of constants is
+//! - [`measure`] — the measure problem: the productive share under five priors
 //! - [`bootloader`] — emergent structures that transport computation, and the
 //!   seed they hand to the next layer
 //! - [`report`] — CSV, JSON and a summary that declines to overstate the result
+//! - [`provenance`] — `metadata.json`: where a run's numbers came from
 //! - [`rng`] — the creator's input channel; the reason runs are reproducible
+//! - [`stats`] — summaries, intervals and effect sizes for ensembles
 //! - [`golden`] — one fixed universe reduced to one number, so that
 //!   "same seed, same universe" can be checked across platforms
 //!
@@ -50,11 +56,17 @@ pub mod constraints;
 pub mod detector;
 pub mod experiment;
 pub mod golden;
+pub mod information;
 pub mod layer;
+pub mod limits;
+pub mod measure;
+pub mod observables;
 pub mod observer;
 pub mod physics;
 pub mod pipe;
+pub mod provenance;
 pub mod report;
 pub mod rng;
 pub mod space;
+pub mod stats;
 pub mod sweep;

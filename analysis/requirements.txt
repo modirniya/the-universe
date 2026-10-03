@@ -1,5 +1,8 @@
 # The whole dependency list. The core crate's austerity does not extend here --
-# this layer is allowed pandas and matplotlib because reading a CSV and drawing
-# a chart are exactly what they are for -- but it stops at those two.
+# this layer is allowed pandas, scipy and matplotlib because recomputing a
+# summary and drawing a chart are exactly what they are for -- but it stops
+# there. analysis/ledger.py deliberately needs none of them, so CI can run it
+# without a virtual environment.
 pandas>=2.0
+scipy>=1.10
 matplotlib>=3.7

@@ -23,7 +23,7 @@
 
 use crate::budget::Degradation;
 use crate::config::{Config, ReportCfg, WorldCfg};
-use crate::constraints::{Constraints, Params, Resolved};
+use crate::constraints::{CoarseRule, Constraints, Params, Resolved};
 use crate::observer::{Probe, observe};
 use crate::physics::{Rules, tick};
 use crate::pipe::Horizon;
@@ -39,7 +39,18 @@ use crate::space::{Geometry, World};
 /// If a deliberate change to the reference universe moves this number, update
 /// it here and say so in the commit. If it moves without a deliberate change,
 /// that is the finding.
-pub const GOLDEN_FINGERPRINT: u64 = 6_900_610_681_785_451_805;
+///
+/// # History
+///
+/// - v0.7–v0.9: `6_900_610_681_785_451_805`, under the indicator closure for
+///   unobserved ground.
+/// - v1.0: the closure became an explicit parameter and the reference universe
+///   pins the binomial one (`docs/audit.md` §1.1). The new constant was
+///   computed natively and then confirmed on `wasm32-unknown-unknown` before it
+///   was committed; the binomial closure is the first part of the physics to
+///   use floating-point products beyond a mean, so the cross-target check now
+///   covers arithmetic the old reference never exercised.
+pub const GOLDEN_FINGERPRINT: u64 = 8_151_296_893_090_507_384;
 
 /// The reference universe's seed.
 pub const GOLDEN_SEED: u64 = 20_260_818;
@@ -69,6 +80,10 @@ pub fn golden_config() -> Config {
             capped_radius: 1,
             uncapped_radius: 3,
             block_size: 16,
+            // Pinned explicitly: the closure for unobserved ground is part of
+            // the reference universe, and the binomial one exercises float
+            // arithmetic the indicator closure never did.
+            coarse_rule: CoarseRule::Binomial,
         },
         // Deliberately smaller than the world and offset from the origin, so
         // the run exercises rendering, collapse, and the boundary between

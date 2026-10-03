@@ -1,0 +1,865 @@
+# The claims ledger.
+#
+# Every claim this repository makes, in one of four categories:
+#
+#   definition             deliberately built into the model; established by reading the code
+#   consequence            follows necessarily from the definitions; established by a derivation
+#   computational_finding  could have come out otherwise when the model ran; established by an
+#                          experiment with controls, replication and an uncertainty
+#   physical_hypothesis    an interpretation concerning our universe; established by nothing here
+#
+# Ids are <area>-<category>-<nnn>: areas T1..T6 for the theories, DET for detection, GEN for the
+# project as a whole; categories DEF, CON, FND, HYP. The README names every id. A finding carries
+# the experiment and artifacts it rests on, the seeds, the controls, the commit and design version
+# it was last verified at, and one or more [[claim.check]] tables naming an artifact value and the
+# range it must stay in. analysis/ledger.py checks all of it; CI runs it on fresh artifacts.
+#
+# Ranges are loose where a number is an example and tight where it is a count. They exist to catch
+# drift between the code and the README, not to pin a decimal.
+#
+# Status: verified (the checks hold at last_verified_commit), exploratory (the statistic was designed
+# after an earlier look at the model and has not yet been replicated on a preregistered seed range),
+# stale (the artifacts predate a design change), withdrawn (a v0.9 claim the v1.0 redesign overturned,
+# kept so the record shows it), untested (a physical hypothesis).
+
+# ---------------------------------------------------------------------------------------------------
+# General
+# ---------------------------------------------------------------------------------------------------
+
+[[claim]]
+id = "GEN-DEF-001"
+text = "A seed selects one initial condition (and, under lazy rendering, one set of rendering draws) of one configuration and nothing else. An interval over seeds is an interval over initial conditions, not over sizes, probes, rules or closures."
+category = "definition"
+module = "stats, experiment"
+status = "verified"
+source = "src/stats.rs module docs; experiment::ensemble_seeds"
+
+[[claim]]
+id = "GEN-FND-001"
+text = "The same seed produces the same universe on x86_64 Linux, ARM macOS and wasm32: the golden fingerprint 8151296893090507384 is asserted by the native suite and by the WebAssembly suite, neither seeing the other's answer. The constant moved from 6900610681785451805 at v1.0 when the binomial closure became the reference universe's; the change was deliberate and recorded."
+category = "computational_finding"
+module = "golden, rng"
+experiment = "cargo test --workspace; wasm-pack test --node crates/universe-web"
+metric = "World::fingerprint of the reference universe after 64 ticks"
+seeds = 1
+controls = "two independent targets assert one compiled-in constant"
+status = "verified"
+verified_by = "tests"
+last_verified_commit = "see CI"
+design_version = 1
+
+# ---------------------------------------------------------------------------------------------------
+# Theory 1: limits as optimizations
+# ---------------------------------------------------------------------------------------------------
+
+[[claim]]
+id = "T1-DEF-001"
+text = "The four limits are toggles on one density-band cellular automaton: discrete space (subdivision 1 vs 2), discrete time (1 vs 2 substeps), the speed cap (radius 1 vs 3) and lazy rendering (unobserved blocks held as a density). 'Relaxing' the speed cap changes the neighbourhood and therefore the law, not only its speed."
+category = "definition"
+module = "constraints, physics"
+status = "verified"
+source = "constraints::Resolved; docs/audit.md section 1.3"
+
+[[claim]]
+id = "T1-DEF-002"
+text = "What stands in for an unobserved block is an assumption of the model, not a consequence of the theory. Three closures are implemented: binomial (the rule averaged over a binomial neighbour count; the default from v1.0), indicator (what v0.1-v0.9 shipped; it saturates a block whose neighbours sit in the birth band) and frozen (the density is held). Every lazy result is reported under each."
+category = "definition"
+module = "constraints::CoarseRule, physics"
+status = "verified"
+source = "constraints::CoarseRule docs; docs/derivations.md section 3; docs/audit.md section 1.1"
+
+[[claim]]
+id = "T1-CON-001"
+text = "The work and memory ratios of the limits are arithmetic on the config: 1/4 for space, 1/2 for time, 1/6 for the speed cap, about 1/4 for lazy rendering at the shipped probe, and about 1/192 = 0.0052 for all four together. Their main effects on log work are exactly additive with zero interaction."
+category = "consequence"
+module = "constraints, physics, limits"
+status = "verified"
+derivation = "docs/derivations.md section 1; limits::tests::work_main_effects_are_the_config_arithmetic"
+artifacts = ""
+  [[claim.check]]
+  file = "factorial.csv"
+  column = "work_ratio"
+  where = { label = "all_on", kind = "factorial" }
+  min = 0.0050
+  max = 0.0056
+
+[[claim]]
+id = "T1-CON-002"
+text = "Discrete time and the speed cap are coupled: influence covers radius x substeps cells per tick over cells of size 1/subdivision, so refining time without refining space raises the physical speed of influence. This follows from the definitions and was noticed, not discovered."
+category = "consequence"
+module = "constraints::Resolved"
+status = "verified"
+derivation = "constraints::Resolved::influence_speed; constraints::tests::refining_time_alone_raises_influence_speed"
+
+[[claim]]
+id = "T1-FND-001"
+text = "Every limit except discrete time moves the universe's macro-scale observables far beyond what a reseed does. Distance D (root mean square of seven observables' z-scores against seed-to-seed spread) is 9.2 +/- 2.6 for discrete space, 62 +/- 2 for the speed cap, 21 +/- 1 for lazy rendering under the binomial closure and 116 +/- 8 for all four, against 1.46 +/- 0.78 for a reseed; each exceeds the reseed's late-time divergence in 20/20 seeds."
+category = "computational_finding"
+module = "limits, observables"
+experiment = "run --config configs/default.toml"
+artifacts = ""
+metric = "distance D and second-half macro divergence, per setting, against the reseed null"
+seeds = 20
+controls = "reseed, one-cell perturbation, 1% density nudge, shuffled surrogate, 190 pairwise reference pairs"
+status = "verified"
+last_verified_commit = "972145de8c39b2f6d38c726e8908e357bb097f44"
+design_version = 2
+  [[claim.check]]
+  file = "ensemble.json"
+  path = "settings[label=space].distance.mean"
+  min = 4.0
+  max = 20.0
+  [[claim.check]]
+  file = "ensemble.json"
+  path = "settings[label=speed].distance.mean"
+  min = 30.0
+  [[claim.check]]
+  file = "ensemble.json"
+  path = "settings[label=lazy].distance.mean"
+  min = 8.0
+  [[claim.check]]
+  file = "ensemble.json"
+  path = "settings[label=all_on].distance.mean"
+  min = 50.0
+  [[claim.check]]
+  file = "ensemble.json"
+  path = "settings[label=space].above_reseed"
+  min = 18
+  [[claim.check]]
+  file = "ensemble.json"
+  path = "settings[label=lazy].above_reseed"
+  min = 18
+  [[claim.check]]
+  file = "ensemble.json"
+  path = "settings[label=seed].distance.mean"
+  min = 1.0
+  max = 2.2
+
+[[claim]]
+id = "T1-FND-002"
+text = "Discrete time is the only setting whose distance from the reference is within the reseed null's: D 1.38 +/- 0.60 [1.10, 1.66] against 1.46 +/- 0.78 [1.10, 1.83] for a reseed. Its late-time divergence is 0.93 +/- 0.05 times the reseed's and exceeds it in 2/20 seeds. Its per-observable shifts (churn +1.7 sd, dispersion -1.0 sd, occupancy +0.9 sd) are not resolvable at n = 20. This is 'not distinguishable from a reseed by these observables', not 'free'."
+category = "computational_finding"
+module = "limits, observables"
+experiment = "run --config configs/default.toml"
+artifacts = ""
+metric = "distance D, ratio of second-half divergence to the reseed null, seeds above the null"
+seeds = 20
+controls = "reseed, one-cell perturbation, density nudge, shuffled surrogate"
+status = "verified"
+last_verified_commit = "972145de8c39b2f6d38c726e8908e357bb097f44"
+design_version = 2
+  [[claim.check]]
+  file = "ensemble.json"
+  path = "settings[label=time].distance.mean"
+  min = 0.6
+  max = 2.4
+  [[claim.check]]
+  file = "ensemble.json"
+  path = "settings[label=time].above_reseed"
+  max = 6
+  [[claim.check]]
+  file = "ensemble.json"
+  path = "settings[label=time].ratio_to_reseed.mean"
+  min = 0.80
+  max = 1.05
+
+[[claim]]
+id = "T1-FND-003"
+text = "The v0.9 result 'discrete time diverges below the chaos floor in 20/20 seeds' rested on a whole-run mean that is dominated by the shared start: a same-seed comparison begins correlated and a reseed does not. Over the whole run discrete time reads 0.91x the reseed; over the second half 0.93x; the divergence metric also scores a universe with less macro variance below the null by Jensen's inequality. The 'free lunch' claim is withdrawn and replaced by T1-FND-002."
+category = "computational_finding"
+module = "limits, experiment"
+experiment = "run --config configs/default.toml"
+artifacts = ""
+metric = "whole-run against second-half mean divergence of the time setting"
+seeds = 20
+controls = "reseed null measured on the same windows"
+status = "withdrawn"
+last_verified_commit = "972145de8c39b2f6d38c726e8908e357bb097f44"
+design_version = 2
+  [[claim.check]]
+  file = "ensemble.json"
+  path = "settings[label=time].div_whole.mean"
+  max = 0.09
+
+[[claim]]
+id = "T1-FND-004"
+text = "The speed cap changes the law, and the observables say so: occupancy falls from about 0.23 to 0.06 (z = -17), components per thousand cells rise by 146 sd and compressibility by 67 sd. The reference against which every other limit is judged is a radius-3 larger-than-life automaton; the capped universe is Conway's Life."
+category = "computational_finding"
+module = "limits, observables"
+experiment = "run --config configs/default.toml"
+artifacts = ""
+metric = "mean z per observable, speed setting"
+seeds = 20
+controls = "reseed null per observable"
+status = "verified"
+last_verified_commit = "972145de8c39b2f6d38c726e8908e357bb097f44"
+design_version = 2
+  [[claim.check]]
+  file = "ensemble.json"
+  path = "settings[label=speed].mean_z.components"
+  min = 50.0
+  [[claim.check]]
+  file = "ensemble.json"
+  path = "settings[label=speed].mean_z.occupancy"
+  max = -8.0
+
+[[claim]]
+id = "T1-FND-005"
+text = "How visible lazy rendering is depends on the closure for unobserved ground. Under the frozen closure its late-time macro divergence equals a reseed's (ratio 1.00 +/- 0.07, above the reseed in 10/20 seeds) while its distance D is 11.3 +/- 0.4 -- the single divergence metric can be matched while seven observables differ by eleven standard deviations. Under the indicator closure D is 24 +/- 6; under the binomial, 21 +/- 1."
+category = "computational_finding"
+module = "limits, constraints::CoarseRule"
+experiment = "run --config configs/default.toml"
+artifacts = ""
+metric = "distance D and divergence ratio of lazy under three closures"
+seeds = 20
+controls = "reseed null; the three closures as an ablation"
+status = "verified"
+last_verified_commit = "972145de8c39b2f6d38c726e8908e357bb097f44"
+design_version = 2
+  [[claim.check]]
+  file = "ensemble.json"
+  path = "settings[label=lazy@frozen].ratio_to_reseed.mean"
+  min = 0.90
+  max = 1.12
+  [[claim.check]]
+  file = "ensemble.json"
+  path = "settings[label=lazy@frozen].distance.mean"
+  min = 5.0
+  [[claim.check]]
+  file = "ensemble.json"
+  path = "settings[label=lazy@indicator].distance.mean"
+  min = 8.0
+
+[[claim]]
+id = "T1-FND-006"
+text = "The limits interact. The speed cap x lazy rendering interaction on D is 10.9 +/- 2.2: under Conway the binomial closure holds unobserved ground near its mean-field fixed point of 0.37 while rendered ground decays, and under the radius-3 rule it does the opposite. No single-limit run could have shown this."
+category = "computational_finding"
+module = "limits"
+experiment = "run --config configs/default.toml"
+artifacts = ""
+metric = "two-factor interaction on D from the 2^4 factorial"
+seeds = 20
+controls = "the full factorial; main effects on log work as the additive reference"
+status = "verified"
+last_verified_commit = "972145de8c39b2f6d38c726e8908e357bb097f44"
+design_version = 2
+  [[claim.check]]
+  file = "ensemble.json"
+  path = "interactions[5].on_distance.mean"
+  min = 4.0
+
+[[claim]]
+id = "T1-FND-007"
+text = "On the cost-fidelity plane no setting is both cheaper and closer than all_on (work 0.005, D 116), and none is both cheaper and closer than time (work 0.5, D 1.4); the Pareto set is {all_off, time, space+time, space+time+speed, space+time+lazy, space+speed+lazy, all_on}. Work saved per unit of D is 0.36 for time and under 0.1 for every other setting."
+category = "computational_finding"
+module = "limits"
+experiment = "run --config configs/default.toml"
+artifacts = ""
+metric = "Pareto set over (mean work ratio, mean D)"
+seeds = 20
+controls = "reseed null defines the floor of D"
+status = "verified"
+last_verified_commit = "972145de8c39b2f6d38c726e8908e357bb097f44"
+design_version = 2
+  [[claim.check]]
+  file = "ensemble.json"
+  path = "pareto"
+  contains = "time"
+  [[claim.check]]
+  file = "ensemble.json"
+  path = "pareto"
+  contains = "all_on"
+
+# ---------------------------------------------------------------------------------------------------
+# Theory 2: nesting and degradation
+# ---------------------------------------------------------------------------------------------------
+
+[[claim]]
+id = "T2-CON-001"
+text = "A chain in which each child receives a fraction f of its parent's budget is finite: the deepest viable layer is 1 + floor(log(root/viable_work) / log(1/f)), and the whole chain costs under root / (1 - f), which is 4/3 of the root at f = 1/4. Integer flooring makes the depth a bound, not an equality. The shipped chain builds 3 layers against a closed form of 4."
+category = "consequence"
+module = "budget, layer"
+status = "verified"
+derivation = "docs/derivations.md section 2; budget::tests"
+artifacts = "nesting"
+  [[claim.check]]
+  file = "nesting/chain.csv"
+  column = "depth"
+  aggregate = "count"
+  min = 3
+  max = 4
+
+[[claim]]
+id = "T2-CON-002"
+text = "Cost is not monotone in world size, because lazy rendering charges by the block and the rescaled probe lands on block boundaries differently at each size. A chain can therefore end on block quantisation -- a world above the size floor would fit by area but none fits by block -- as well as on budget or on space. The termination map computes which binds where, over fractions, floors, block sizes and root sizes, without running any physics."
+category = "consequence"
+module = "layer::map_terminations"
+status = "verified"
+derivation = "docs/derivations.md section 2; layer::tests::cost_is_not_monotonic_in_world_size"
+artifacts = "nesting"
+  [[claim.check]]
+  file = "nesting/terminations.csv"
+  column = "ending"
+  where = { ending = "quantisation" }
+  aggregate = "count"
+  min = 1
+  [[claim.check]]
+  file = "nesting/terminations.csv"
+  column = "ending"
+  where = { ending = "budget" }
+  aggregate = "count"
+  min = 1
+
+[[claim]]
+id = "T2-CON-003"
+text = "A layer of the chain is a standalone universe of its size, seed and probe: nothing about its host reaches it. The size control reproduces every layer's churn and work exactly. Any trend down a chain is a trend in world size, and 'degradation signature' is the wrong name for it."
+category = "consequence"
+module = "layer::size_control"
+status = "verified"
+derivation = "layer::run_chain calls experiment::run on a smaller config; layer::tests::a_layer_is_a_standalone_universe_of_its_size"
+artifacts = "nesting"
+  [[claim.check]]
+  file = "nesting/size_control.json"
+  path = "[0].identical"
+  equals = true
+
+[[claim]]
+id = "T2-FND-001"
+text = "The v0.9 finding 'the deepest layer is calmer than the root in 20/20 seeds' held under the indicator closure and holds in 0/20 under the binomial one: churn is 0.0053 at depth 1, 0.0062 at depth 2 and 0.0162 at depth 3. Churn tracks the share of blocks the rescaled probe resolves (0.25 at edges 21, 64 and 128; 1.00 at 16, 24, 32, 48), not depth. Withdrawn as a result about nesting."
+category = "computational_finding"
+module = "layer"
+experiment = "nest --config configs/nesting.toml"
+artifacts = "nesting"
+metric = "mean tick-to-tick macro churn per layer; churn against size for standalone universes"
+seeds = 20
+controls = "standalone universes at every edge the chain could choose, with the resolved share recorded"
+status = "withdrawn"
+last_verified_commit = "972145de8c39b2f6d38c726e8908e357bb097f44"
+design_version = 2
+  [[claim.check]]
+  file = "nesting/ensemble.csv"
+  column = "churn"
+  where = { depth = "3" }
+  aggregate = "mean"
+  min = 0.010
+  [[claim.check]]
+  file = "nesting/ensemble.csv"
+  column = "churn"
+  where = { depth = "1" }
+  aggregate = "mean"
+  max = 0.008
+
+# ---------------------------------------------------------------------------------------------------
+# Theory 3: the horizon as a serializing pipe
+# ---------------------------------------------------------------------------------------------------
+
+[[claim]]
+id = "T3-DEF-001"
+text = "A message is a magnitude (the horizon's occupancy) and a position-sensitive hash, in a channel of a stated width; the child holds a WriteEnd with write and seal and nothing else, and no conversion leads back from the ReadEnd. That magnitude and timing cross and arrangement does not is how the message was built. The horizon is a rectangle of cells; the module models no black hole."
+category = "definition"
+module = "pipe"
+status = "verified"
+source = "pipe::Message, pipe::WriteEnd, pipe::ReadEnd"
+
+[[claim]]
+id = "T3-CON-001"
+text = "The hash carries no information about occupancy: hash:6 against horizon_now reads 0.00 +/- 0.05 bits of corrected mutual information, and one changed cell flips about half the digest's bits. Both are properties of hashing, checked so that the fold is known to be a hash."
+category = "consequence"
+module = "pipe, information"
+status = "verified"
+derivation = "docs/derivations.md section 5"
+artifacts = "pipe"
+  [[claim.check]]
+  file = "pipe/information.json"
+  path = "rows[encoding=hash:6,task=horizon_now].measure.mi_corrected"
+  min = -0.2
+  max = 0.2
+  [[claim.check]]
+  file = "pipe/pipe.json"
+  path = "content_avalanche"
+  min = 0.4
+  max = 0.6
+
+[[claim]]
+id = "T3-FND-001"
+text = "At full width the shipped encoding carries 1.44 +/- 0.19 bits per tick about the horizon's own occupancy (of an input entropy of 2.0 +/- 0.2 at 64 levels and a target entropy of 3.0), 0.48 +/- 0.23 about the whole child's occupancy now, 0.32 +/- 0.20 about it ten ticks ahead, 0.22 +/- 0.17 about which quadrant of the horizon is densest, and 0.75 +/- 0.16 about the four-quadrant pattern. The leave-one-out predictive information is within 0.1 bit of each."
+category = "computational_finding"
+module = "information"
+experiment = "pipe --config configs/pipe.toml"
+artifacts = "pipe"
+metric = "plug-in mutual information minus its shuffle null, bits per tick, per task"
+seeds = 20
+controls = "20 time permutations per measure; random symbols; a window half a world away; bit flips"
+status = "verified"
+last_verified_commit = "972145de8c39b2f6d38c726e8908e357bb097f44"
+design_version = 2
+  [[claim.check]]
+  file = "pipe/information_ensemble.csv"
+  column = "mi_corrected"
+  where = { kind = "encoding", encoding = "uniform:128", task = "horizon_now" }
+  aggregate = "mean"
+  min = 1.0
+  max = 2.0
+  [[claim.check]]
+  file = "pipe/information_ensemble.csv"
+  column = "mi_corrected"
+  where = { kind = "encoding", encoding = "uniform:128", task = "global_now" }
+  aggregate = "mean"
+  min = 0.2
+  max = 0.9
+  [[claim.check]]
+  file = "pipe/information_ensemble.csv"
+  column = "mi_corrected"
+  where = { kind = "noise_control" }
+  aggregate = "mean"
+  min = -0.1
+  max = 0.1
+
+[[claim]]
+id = "T3-FND-002"
+text = "What a narrow channel keeps depends on the encoding and on where the horizon sits. With the horizon straddling rendered and coarse ground, the shipped uniform quantiser at one and two bits carries 0.00 bits about anything (its levels never trip), three bits carry 0.64 +/- 0.17 about the horizon and four bits 0.19 +/- 0.22 (the curve is not monotone in width), while an adaptive four-bit quantiser carries 1.89 +/- 0.14 -- more than the exact magnitude read at 64 levels. The v0.9 result 'two to six bits keep 90%' was a property of one placement and one encoding and is withdrawn as a general statement."
+category = "computational_finding"
+module = "information"
+experiment = "pipe --config configs/pipe.toml"
+artifacts = "pipe"
+metric = "corrected mutual information about horizon_now, per encoding and width"
+seeds = 20
+controls = "shuffle null; five encodings at matched widths"
+status = "verified"
+last_verified_commit = "972145de8c39b2f6d38c726e8908e357bb097f44"
+design_version = 2
+  [[claim.check]]
+  file = "pipe/information_ensemble.csv"
+  column = "mi_corrected"
+  where = { kind = "encoding", encoding = "uniform:2", task = "horizon_now" }
+  aggregate = "mean"
+  max = 0.05
+  [[claim.check]]
+  file = "pipe/information_ensemble.csv"
+  column = "mi_corrected"
+  where = { kind = "encoding", encoding = "adaptive:4", task = "horizon_now" }
+  aggregate = "mean"
+  min = 1.4
+
+[[claim]]
+id = "T3-FND-003"
+text = "A window half a world away, read through the same encoding, carries 0.17 +/- 0.09 bits about the whole child against the horizon's 0.48 +/- 0.23. The far window lies wholly in coarse ground, whose density is a closure's output, while the horizon straddles rendered ground; the difference is between rendered and unrendered ground, not evidence that the horizon mechanism adds anything. A like-for-like control (two windows over the same kind of ground) has not been run."
+category = "computational_finding"
+module = "information"
+experiment = "pipe --config configs/pipe.toml"
+artifacts = "pipe"
+metric = "corrected mutual information about global_now from the far window"
+seeds = 20
+controls = "the horizon itself; random symbols"
+status = "exploratory"
+last_verified_commit = "972145de8c39b2f6d38c726e8908e357bb097f44"
+design_version = 2
+  [[claim.check]]
+  file = "pipe/information_ensemble.csv"
+  column = "mi_corrected"
+  where = { kind = "window_control", encoding = "uniform:128" }
+  aggregate = "mean"
+  min = 0.0
+  max = 0.5
+
+[[claim]]
+id = "T3-HYP-001"
+text = "A black hole is a one-way serializing channel between simulation layers: content structure is destroyed, timing and magnitude may survive."
+category = "physical_hypothesis"
+module = "docs/philosophy.md section 3"
+status = "untested"
+
+# ---------------------------------------------------------------------------------------------------
+# Theory 4: mutual blindness and the logging threshold
+# ---------------------------------------------------------------------------------------------------
+
+[[claim]]
+id = "T4-DEF-001"
+text = "A child cannot learn that it is read: WriteEnd exposes no method returning anything about the far side. A parent sees only what clears the logging threshold (ReadEnd::above). Both are types, not measurements."
+category = "definition"
+module = "pipe"
+status = "verified"
+source = "pipe::WriteEnd, pipe::ReadEnd::above"
+
+[[claim]]
+id = "T4-HYP-001"
+text = "A creator may be unaware of or indifferent to its inhabitants: watching a dashboard whose resolution does not include them."
+category = "physical_hypothesis"
+module = "docs/philosophy.md section 4"
+status = "untested"
+
+# ---------------------------------------------------------------------------------------------------
+# Detection
+# ---------------------------------------------------------------------------------------------------
+
+[[claim]]
+id = "DET-DEF-001"
+text = "An inhabitant measures in cells because it is made of them, so the lattice's scale cannot be read from inside. v0.9 reported a min_feature of 1.0 as a measurement; it was a literal, and the claim is a definition."
+category = "definition"
+module = "detector"
+status = "verified"
+source = "docs/audit.md section 2.1"
+
+[[claim]]
+id = "DET-CON-001"
+text = "The reach of influence per tick is radius x substeps by construction, so an inhabitant finds the speed cap and discrete time with power 20/20 and zero false positives by reading it, and cannot tell the two apart by it: three substeps of radius one and one of radius three read the same number."
+category = "consequence"
+module = "detector"
+status = "verified"
+derivation = "docs/derivations.md section 4"
+artifacts = "detect"
+  [[claim.check]]
+  file = "detect/detection.json"
+  path = "tests[gaze=looking renders,limit=speed_cap,statistic=influence_speed].tpr"
+  equals = 1.0
+  [[claim.check]]
+  file = "detect/detection.json"
+  path = "tests[gaze=looking renders,limit=discrete_time,statistic=influence_speed].tpr"
+  equals = 1.0
+
+[[claim]]
+id = "DET-CON-002"
+text = "The lattice's anisotropy reads sqrt(2) at every scale, because the corner of a Moore neighbourhood is sqrt(2) further than its edge. The shape of the lattice is visible from inside and its scale is not; both are geometry. The only empirical content is that natural births reach the corner, which they did in every universe measured."
+category = "consequence"
+module = "detector"
+status = "verified"
+derivation = "docs/derivations.md section 4"
+artifacts = "detect"
+  [[claim.check]]
+  file = "detect/detection.json"
+  path = "isotropy.lattice"
+  min = 1.4142
+  max = 1.4143
+  [[claim.check]]
+  file = "detect/detection.json"
+  path = "isotropy.finer"
+  min = 1.4142
+  max = 1.4143
+
+[[claim]]
+id = "DET-CON-003"
+text = "A reader that could see without rendering finds lazy rendering by smoothness with power 20/20: coarse ground is one repeated number by definition. The framework does not allow such a reader; the row calibrates what the act of looking conceals."
+category = "consequence"
+module = "detector"
+status = "verified"
+derivation = "detector::standing; space::World::sample"
+artifacts = "detect"
+  [[claim.check]]
+  file = "detect/detection.json"
+  path = "tests[gaze=reads without rendering,limit=lazy_rendering,statistic=smoothness].tpr"
+  min = 0.9
+
+[[claim]]
+id = "DET-FND-001"
+text = "Lazy rendering is findable by an inhabitant whose looking renders. The birth rate at the edge of what it renders, relative to its interior (edge_excess), separates the lazy universe from the fully rendered one with power 19/20 [0.76, 0.99] at a false-positive rate of 1/20 on held-out seeds. The v0.9 claim 'looking conceals lazy rendering' is withdrawn. But the same rule flags the resample control -- fully rendered, unobserved blocks redrawn from their own density -- in 20/20 seeds: what is detected is the approximation at the boundary, not non-computation as such."
+category = "computational_finding"
+module = "detector"
+experiment = "detect --config configs/detect.toml"
+artifacts = "detect"
+metric = "power and FPR of edge_excess on 20 held-out seeds, rule calibrated on 20 others"
+seeds = 40
+controls = "two all-limits universes at neighbouring seeds; the resample control"
+status = "exploratory"
+last_verified_commit = "972145de8c39b2f6d38c726e8908e357bb097f44"
+design_version = 2
+  [[claim.check]]
+  file = "detect/detection.json"
+  path = "tests[gaze=looking renders,limit=lazy_rendering,statistic=edge_excess].tpr"
+  min = 0.75
+  [[claim.check]]
+  file = "detect/detection.json"
+  path = "tests[gaze=looking renders,limit=lazy_rendering,statistic=edge_excess].fpr"
+  max = 0.2
+  [[claim.check]]
+  file = "detect/detection.json"
+  path = "resample[gaze=looking renders,statistic=edge_excess].resample_flagged"
+  min = 15
+
+[[claim]]
+id = "DET-FND-002"
+text = "The negative control is quiet: with H1 replaced by an all-limits universe at the next seed, no statistic reaches power above 0.10 (2/20). The detection machinery does not detect seeds."
+category = "computational_finding"
+module = "detector"
+experiment = "detect --config configs/detect.toml"
+artifacts = "detect"
+metric = "highest power over statistics and gazes on the negative control"
+seeds = 40
+controls = "this is the control"
+status = "verified"
+last_verified_commit = "972145de8c39b2f6d38c726e8908e357bb097f44"
+design_version = 2
+  [[claim.check]]
+  file = "detect/detection.json"
+  path = "control_ceiling"
+  max = 0.3
+
+[[claim]]
+id = "DET-FND-003"
+text = "With the honest gaze, discrete space is not reliably found: its best statistic, edge_excess, has power 11/20 [0.34, 0.74] at a false-positive rate of 1/20, and every other statistic is at chance. Because each limit's H0 keeps the other three limits in force, this is the difference discrete space makes in the presence of lazy rendering, not alone."
+category = "computational_finding"
+module = "detector"
+experiment = "detect --config configs/detect.toml"
+artifacts = "detect"
+metric = "power of edge_excess for discrete_space on held-out seeds"
+seeds = 40
+controls = "negative control; the other three statistics"
+status = "exploratory"
+last_verified_commit = "972145de8c39b2f6d38c726e8908e357bb097f44"
+design_version = 2
+  [[claim.check]]
+  file = "detect/detection.json"
+  path = "tests[gaze=looking renders,limit=discrete_space,statistic=edge_excess].tpr"
+  min = 0.2
+  max = 0.85
+
+[[claim]]
+id = "DET-FND-004"
+text = "The speed cap is also found by texture: the radius-3 rule leaves solid 3x3 patches that Conway does not, so smoothness separates the two with power 20/20 and no false positives. A different law has a different texture; this is a finding about the two laws, not about speed."
+category = "computational_finding"
+module = "detector"
+experiment = "detect --config configs/detect.toml"
+artifacts = "detect"
+metric = "power of smoothness for speed_cap on held-out seeds"
+seeds = 40
+controls = "negative control"
+status = "verified"
+last_verified_commit = "972145de8c39b2f6d38c726e8908e357bb097f44"
+design_version = 2
+  [[claim.check]]
+  file = "detect/detection.json"
+  path = "tests[gaze=looking renders,limit=speed_cap,statistic=smoothness].tpr"
+  min = 0.9
+
+# ---------------------------------------------------------------------------------------------------
+# Theory 5: bootloader life
+# ---------------------------------------------------------------------------------------------------
+
+[[claim]]
+id = "T5-DEF-001"
+text = "A bootloader is a cluster of 3 to 40 live cells tracked by nearest-centroid matching within 3 cells that persists for at least 20 ticks and travels at least 4 cells. Conway's glider is one; a block is not. The thresholds are choices."
+category = "definition"
+module = "bootloader"
+status = "verified"
+source = "bootloader::Track::is_bootloader"
+
+[[claim]]
+id = "T5-DEF-002"
+text = "A child's seed is hashed from what crossed its parent's horizon and from nothing else; bootloaders reach the next layer only through a gate that forbids a sterile layer to seed a child. The gate is the framework's rule. The ablation confirms that gated and ungated chains never differ in a layer both built."
+category = "definition"
+module = "bootloader::Gate, bootloader::boot_seed"
+status = "verified"
+source = "bootloader module docs"
+artifacts = "boot"
+  [[claim.check]]
+  file = "boot/gate.csv"
+  column = "prefix"
+  aggregate = "count_true"
+  min = 20
+  [[claim.check]]
+  file = "boot-permissive/gate.csv"
+  column = "prefix"
+  aggregate = "count_true"
+  min = 20
+
+[[claim]]
+id = "T5-FND-001"
+text = "The tracker's false-positive floor is small: the same frames in a shuffled order, where nothing travels, yield 0.35 +/- 0.18 bootloaders per thousand cells against 7.3 +/- 0.6 in the real order -- 5% +/- 3% -- and the real count exceeded the shuffled in 20/20 seeds. Bootloader counts are mostly transport, not debris."
+category = "computational_finding"
+module = "bootloader::shuffle_control"
+experiment = "boot --config configs/boot.toml"
+artifacts = "boot"
+metric = "bootloaders per thousand cells in real and time-shuffled frames"
+seeds = 20
+controls = "this is the control"
+status = "verified"
+last_verified_commit = "972145de8c39b2f6d38c726e8908e357bb097f44"
+design_version = 2
+  [[claim.check]]
+  file = "boot/shuffle_control.csv"
+  column = "shuffled_per_kilocell"
+  aggregate = "mean"
+  max = 1.5
+  [[claim.check]]
+  file = "boot/shuffle_control.csv"
+  column = "real_per_kilocell"
+  aggregate = "mean"
+  min = 4.0
+
+[[claim]]
+id = "T5-FND-002"
+text = "The v0.9 finding 'poorer layers produce less life (128 -> 32 -> 6 bootloaders)' was area scaling. Per thousand cells the density rises down the chain, 7.3 +/- 0.6 -> 10.8 +/- 1.7 -> 13.0 +/- 4.2, and standalone universes of the same sizes at the root's seed match it (7.3, 10.6, 12.6). The deepest layer's density is below the root's in 1/20 seeds. Withdrawn as a result about degradation."
+category = "computational_finding"
+module = "bootloader::area_control"
+experiment = "boot --config configs/boot.toml"
+artifacts = "boot"
+metric = "bootloaders per thousand cells by depth, and in standalone universes of the layer's size"
+seeds = 20
+controls = "standalone universes at the root's seed and at the layer's own seed"
+status = "withdrawn"
+last_verified_commit = "972145de8c39b2f6d38c726e8908e357bb097f44"
+design_version = 2
+  [[claim.check]]
+  file = "boot/area_control.csv"
+  column = "layer_per_kilocell"
+  where = { depth = "1" }
+  aggregate = "mean"
+  max = 9.0
+  [[claim.check]]
+  file = "boot/area_control.csv"
+  column = "layer_per_kilocell"
+  where = { depth = "3" }
+  aggregate = "mean"
+  min = 9.0
+  [[claim.check]]
+  file = "boot/area_control.csv"
+  column = "identical"
+  aggregate = "count_true"
+  min = 60
+
+[[claim]]
+id = "T5-FND-003"
+text = "Under the shipped floors the gate never fires: gated and ungated chains are identical in 20/20 seeds and every chain ends on space at depth 3. Under permissive floors (edge 4, 2000 work units) it fires in 16/20 seeds and is the sole stop in 7/20; the rest end on space. In the edge map, sterility alone ends a chain only at fractions of 0.3 or more with a size floor of 8 or less, in at most 2 of 10 seeds per cell, and is never the commonest ending anywhere."
+category = "computational_finding"
+module = "bootloader"
+experiment = "boot --config configs/boot.toml; boot --config configs/boot-permissive.toml; edge --config configs/edge.toml"
+artifacts = "boot"
+metric = "gate fired, sole stop, and the ending per cell of the fraction x floor map"
+seeds = 20
+controls = "the gate ablation (Gate::Open) at every setting"
+status = "verified"
+last_verified_commit = "972145de8c39b2f6d38c726e8908e357bb097f44"
+design_version = 2
+  [[claim.check]]
+  file = "boot/gate.csv"
+  column = "gate_fired"
+  aggregate = "count_true"
+  equals = 0
+  [[claim.check]]
+  file = "boot-permissive/gate.csv"
+  column = "gate_fired"
+  aggregate = "count_true"
+  min = 8
+  [[claim.check]]
+  file = "edge/edge.csv"
+  column = "ending"
+  where = { ending = "sterile" }
+  aggregate = "count"
+  min = 1
+
+[[claim]]
+id = "T5-HYP-001"
+text = "The cosmic role of emergent agents is to boot the next layer: life's structural function in a chain of simulations is to instantiate the layer below."
+category = "physical_hypothesis"
+module = "docs/philosophy.md section 5"
+status = "untested"
+
+# ---------------------------------------------------------------------------------------------------
+# Theory 6: fine-tuning
+# ---------------------------------------------------------------------------------------------------
+
+[[claim]]
+id = "T6-DEF-001"
+text = "'Complex' is one of three criteria, each a band on a statistic: resemblance to Conway within a factor of four on activity and dispersion; compressibility between 0.2 and 0.8 of noise; perturbation growth between 0 and 0.5. All three are choices, and the activity band was changed after a chaotic rule passed a floor. The work is exploratory in that sense."
+category = "definition"
+module = "sweep::Criterion"
+status = "verified"
+source = "sweep module docs; docs/audit.md section 5.2"
+
+[[claim]]
+id = "T6-CON-001"
+text = "A radius-1 neighbourhood has densities k/8 only, so the 21 x 21 grid of band centres denotes 42 distinct laws at Conway's half-widths and 289 with the half-widths swept; the band form can state 46 x 46 = 2116 laws in all, and the outer-totalistic family it cannot state has 2^18."
+category = "consequence"
+module = "sweep::rule_signature, measure::band_laws"
+status = "verified"
+derivation = "measure::tests::the_band_family_has_forty_six_squared_laws_all_distinct"
+
+[[claim]]
+id = "T6-FND-001"
+text = "In the baseline universe (64x64, 80 ticks, density 0.30) productive laws are a minority under every prior and every criterion, in every seed. Across 20 seeds the lowest share is 0.055 +/- 0.035 (all band laws, Conway bar) and the highest 0.446 +/- 0.037 (all band laws, perturbation growth); the life-like sample gives 0.09 to 0.17. 'In the baseline universe' is load-bearing: see T6-FND-003."
+category = "computational_finding"
+module = "measure"
+experiment = "measure --config configs/measure.toml"
+artifacts = "measure"
+metric = "share of laws admitted, five priors x three criteria"
+seeds = 20
+controls = "five priors as the control on the measure; the same life-like sample at every seed"
+status = "verified"
+last_verified_commit = "972145de8c39b2f6d38c726e8908e357bb097f44"
+design_version = 1
+  [[claim.check]]
+  file = "measure/measure.json"
+  path = "highest_share.mean"
+  max = 0.5
+  min = 0.3
+  [[claim.check]]
+  file = "measure/measure.json"
+  path = "lowest_share.mean"
+  max = 0.15
+
+[[claim]]
+id = "T6-FND-002"
+text = "The productive share is a property of the prior and the criterion as much as of the laws: it spans a factor of about eight (0.055 to 0.446) depending on how laws are counted and what counts as complex. Nothing in the model privileges one prior. 'Fine-tuning is X%' has no meaning here without naming both."
+category = "computational_finding"
+module = "measure"
+experiment = "measure --config configs/measure.toml"
+artifacts = "measure"
+metric = "range of the share over priors and criteria"
+seeds = 20
+controls = "five priors, three criteria"
+status = "verified"
+last_verified_commit = "972145de8c39b2f6d38c726e8908e357bb097f44"
+design_version = 1
+  [[claim.check]]
+  file = "measure/measure.json"
+  path = "shares[prior=all band laws,criterion=resembles conway].share.mean"
+  max = 0.15
+  [[claim.check]]
+  file = "measure/measure.json"
+  path = "shares[prior=all band laws,criterion=perturbation growth].share.mean"
+  min = 0.3
+
+[[claim]]
+id = "T6-FND-003"
+text = "The productive share also depends on the universe the laws are tried in. Scoring the band family at other sizes, durations and densities (three seeds each): under the compressibility criterion the share stays at 0.32-0.33 everywhere; under the Conway bar it runs from 0.02 (160 ticks) to 0.19 (40 ticks); under perturbation growth from 0.36 (edge 32) to 0.60 (edge 96) and 0.63 (40 ticks) -- a MAJORITY in two of the six settings. Conway itself fails the growth criterion in every seed at edge 32 and at 160 ticks. 'Fine-tuning' under that criterion is a statement about a world size and a run length."
+category = "computational_finding"
+module = "measure"
+experiment = "measure --config configs/measure.toml"
+artifacts = "measure"
+metric = "share of the 2116 band laws admitted, per setting and criterion"
+seeds = 3
+controls = "the baseline setting; the three criteria; whether Conway passes"
+status = "verified"
+last_verified_commit = "972145de8c39b2f6d38c726e8908e357bb097f44"
+design_version = 1
+  [[claim.check]]
+  file = "measure/measure_sensitivity.csv"
+  column = "fraction"
+  where = { setting = "ticks 40", criterion = "perturbation growth" }
+  aggregate = "mean"
+  min = 0.5
+  [[claim.check]]
+  file = "measure/measure_sensitivity.csv"
+  column = "fraction"
+  where = { setting = "edge 96", criterion = "perturbation growth" }
+  aggregate = "mean"
+  min = 0.5
+  [[claim.check]]
+  file = "measure/measure_sensitivity.csv"
+  column = "fraction"
+  where = { setting = "ticks 160", criterion = "compressibility" }
+  aggregate = "mean"
+  min = 0.28
+  max = 0.38
+  [[claim.check]]
+  file = "measure/measure_sensitivity.csv"
+  column = "fraction"
+  where = { setting = "ticks 160", criterion = "resembles conway" }
+  aggregate = "mean"
+  max = 0.1
+
+[[claim]]
+id = "T6-HYP-001"
+text = "Only narrow bands of a universe's constants produce complexity, and ours sits in one."
+category = "physical_hypothesis"
+module = "docs/philosophy.md section 6"
+status = "untested"

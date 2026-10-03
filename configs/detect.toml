@@ -5,13 +5,21 @@
 # ground and the coarse ground beyond it. One living wholly inside what is
 # rendered finds full texture whatever the config says, because looking is what
 # renders a region.
+#
+# Detection is a hypothesis test. For each limit, H0 is the universe with that
+# limit relaxed and H1 the universe with every limit in force; a statistic the
+# inhabitant can compute is thresholded at the most extreme H0 value over the
+# calibration seeds and judged on the evaluation seeds. Nothing is calibrated
+# and evaluated on the same universe. A negative control (two all-limits
+# universes at neighbouring seeds) and a resample control (fully rendered but
+# statistically approximated) run alongside.
 
 [world]
 width = 96
 height = 96
 ticks = 120
 seed = 42
-seeds = 20           # an ensemble: seed 42 is the pinned example, 19 more make it a finding
+seeds = 40           # 40 seeds: the first 20 calibrate every decision rule, the last 20 evaluate it
 seed_stride = 1000   # seeds 42, 1042, 2042, ...; must exceed 1, the control runs at seed + 1
 init_density = 0.30
 
@@ -21,6 +29,7 @@ substeps = 2
 capped_radius = 1
 uncapped_radius = 3
 block_size = 16
+coarse_rule = "binomial"  # what stands in for unobserved ground: binomial (mean field), indicator (v0.9), or frozen
 
 [observer]
 x = 24

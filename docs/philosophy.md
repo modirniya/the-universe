@@ -1,9 +1,16 @@
 # The theory stack
 
-This file holds the framework the code argues for, including the parts that
-cannot be coded. The code implements sections 1–6 in miniature; sections 7–10
-are here because they explain why the experiments are worth running at all,
-not because the repo can test them.
+This file holds the framework the code was built to investigate, including the
+parts that cannot be coded. The code implements sections 1–6 in miniature;
+sections 7–10 are here because they explain why the experiments were worth
+running at all, not because the repo can test them.
+
+Every statement here is a **physical hypothesis** in the sense of
+`analysis/claims.toml`: an interpretation concerning our universe that nothing
+in this repository tests. Each section ends by saying what the model's
+experiments found when the theory was tried in the toy, and those findings are
+about the toy. Where a v0.9 result has been withdrawn, this file says so rather
+than quietly updating the sentence.
 
 The order matters. Each theory is what makes the next one thinkable.
 
@@ -32,22 +39,35 @@ The claim is not that these are the *only* possible optimizations, nor that a
 creator would necessarily pick them. It is that they are the ones a competent
 engineer would reach for first, and that we appear to live under all three.
 
-**In the code:** `constraints`, `space`, `physics`, `observer`. This is the
-whole of v0.1.
+**In the code:** `constraints`, `space`, `physics`, `observer`, and the
+experiment in `limits`. The four limits are toggles on one automaton; what
+stands in for an unobserved region is an assumption with three implementations,
+and every lazy-rendering result is reported under each.
 
 **What would falsify it within the model:** if turning the limits on failed to
 make the universe meaningfully cheaper, or made it so different that an
-observer could trivially tell. See "Findings" in the README for what actually
-happened, including the one limit that turned out not to be free.
+observer could trivially tell. The first did not happen and could not have:
+the savings are arithmetic on the config. The second did, for three of the four.
+In the v1.0 factorial, discrete space, the speed cap and lazy rendering each
+move seven macro-scale observables by many seed-to-seed standard deviations —
+the speed cap because it changes the law, lazy rendering by an amount that
+depends on the closure chosen for unobserved ground. Discrete time is the one
+limit within a reseed's distance of the reference; at twenty seeds the
+observables cannot tell it from a reseed, which is weaker than v0.9's "free
+lunch, below the chaos floor in 20/20 seeds", a result that turned out to rest
+on a transient and a metric that rewards low variance. So, in this model: a
+competent engineer would take discrete time and pay in visibility for the rest.
 
-**Can an inhabitant tell?** `detector` asks this, and the answer is partial.
-Pixelation's scale is invisible because the cell is the ruler, but its shape is
-not: influence reaches √2 further along a diagonal than along an axis, so an
-inhabitant can learn it lives on a lattice without learning how fine it is. The speed of influence is
-measurable but arrives as a product that cannot be factored, so an inhabitant
-can know it is constrained without learning how. Lazy rendering is concealed by
-the act of measuring it, since looking is what forces a region into full
-resolution — hidden not by subtlety but by contradiction.
+**Can an inhabitant tell?** `detector` asks this as a hypothesis test with
+calibrated error rates. The reach of influence reads `radius × substeps` by
+construction, so the speed cap and discrete time are found and cannot be told
+apart. The lattice's anisotropy is √2 at every scale, so its shape is visible
+and its scale is not — geometry, not a discovery. And lazy rendering, which
+v0.9 said was concealed by the act of looking, is findable: the cells at the
+edge of what an inhabitant renders have neighbours that are densities, and the
+birth rate there gives it away with power 0.95. What is found is the
+approximation at the boundary — a fully rendered universe with equally
+approximated ground is flagged just as often — but it is found.
 
 ---
 
@@ -70,18 +90,27 @@ also means that if we are simulated, we are not simulated *cheaply* — we are
 near enough to the top of a chain to still afford complexity.
 
 **In the code:** `budget` (the degradation rule and the closed-form depth
-bound) and `layer` (the containment relation, and sizing each world to its
-budget). Run it with `the-universe nest`.
+bound) and `layer` (the containment relation, sizing each world to its budget,
+the termination map and the size control). Run it with `the-universe nest`.
 
 **What would falsify it within the model:** a chain that runs deeper than the
 closed form allows, a layer that outspends its host, or a total cost that fails
-to converge. All three are checked. What actually happened is in the README:
-the chain is finite and costs less than 1.33x its root layer, and it died of
-the spatial floor before it ran out of money.
+to converge. None can happen: all three are consequences of the degradation
+rule, derived in `docs/derivations.md`, and the runs confirm the arithmetic.
+What the runs add is which definition ends a chain where — budget, the size
+floor, or the block partition — mapped over four axes without running physics.
+
+**What was withdrawn.** v0.9 reported a "degradation signature": the deepest
+layer calmer than the root in 20/20 seeds. A layer of the chain is a standalone
+universe of its size, by construction — nothing about its host reaches it — so
+the signature was a statement about world size, and under a binomial closure
+for unobserved ground it inverts: 0/20. Degradation here is a budget rule and a
+size rule and has no trace in the dynamics beyond what size and the partition
+produce.
 
 ---
 
-## 3. Black holes as serializing pipes
+## 3. The horizon as a serializing pipe (the black-hole analogy)
 
 A **pipe** is a one-way channel between layers.
 
@@ -100,22 +129,28 @@ What might survive serialization is not content but *timing and magnitude*: how
 much went in, and when. A parent reading the far end of the pipe would receive
 something closer to a log line than a message.
 
-**In the code:** `pipe`. The horizon is a region of the child universe folded
-into one 128-bit message per tick, whatever its area. Serialization is
-position-sensitive, so the digest depends on the arrangement — and avalanching,
-so it cannot be read back as one.
+**In the code:** `pipe` and `information`. The horizon is a region of the
+child universe folded into one message per tick, whatever its area. The code
+never calls it a black hole: the module models a channel, and the analogy is
+this paragraph.
 
 **What is designed in.** The message has a field for magnitude and a digest
 that is a hash, so "timing and magnitude survive, arrangement does not" is how
-the pipe was built rather than something the run discovered. The avalanche
-test checks the hash, nothing more.
+the pipe was built rather than something the run discovered. That the hash
+carries no occupancy is a property of hashing.
 
 **What would falsify it within the model:** a parent's view uncorrelated with
-the child's behaviour at every channel width, meaning the pipe carries nothing
-at all; or a channel that needs most of the horizon's bits to track the child,
-meaning it is a window rather than a bottleneck. Neither happened. What crossed
-tracks the child at 0.82 on average across twenty seeds, and two or three bits
-a tick usually keep 90% of that.
+the child's behaviour at every width and encoding, meaning the pipe carries
+nothing; or the horizon carrying information that a window elsewhere would not,
+meaning the mechanism did something unaccounted for. Neither happened. At full
+width the horizon carries 1.4 bits a tick about its own occupancy, 0.5 about
+the whole child now, 0.3 about the child ten ticks ahead and 0.2 about which
+quadrant is densest. What a narrow channel keeps is the encoding's: two
+uniform bits carry nothing at the horizon's placement, an adaptive four bits
+carry 1.9. v0.9's "two to six bits keep 90%" was one encoding at one placement
+and is withdrawn as a general statement. The pipe is a quantised channel and
+nothing more; what survives it is what any channel of that width carries about
+a slowly varying aggregate.
 
 ---
 
@@ -177,8 +212,10 @@ what crossed its parent's horizon, so the child is booted from inside the
 parent, through a channel neither end can see through.
 
 **What would falsify it within the model:** bootloaders appearing everywhere,
-which would make them unremarkable and disconnect this from Theory 6; or nowhere,
-which would mean the chain is inert by construction. Neither happened.
+which would make them unremarkable and disconnect this from Theory 6; or
+nowhere, which would mean the chain is inert by construction. Neither happened:
+about seven per thousand cells in a Conway soup, of which the tracker's
+false-positive floor (the same frames in shuffled order) accounts for 5%.
 
 **What the model does not show.** The child's seed is derived from what crossed
 the horizon, and bootloaders never enter it. They reach the next layer only
@@ -186,9 +223,12 @@ through a gate the framework imposes: a layer with no bootloader may not seed a
 child. Removing the gate changes nothing under the shipped floors, and under
 permissive ones it only lets chains run further; in no case does it change what
 a child is. So in this model life decides *whether* the next layer exists, by
-rule, and never *what* it is. A version of Theory 5 with teeth would need the
-child to depend on what the bootloaders did, and that is the unscheduled
-research track, not this repository.
+rule, and never *what* it is.
+
+**What was withdrawn.** v0.9 read "128 → 32 → 6 bootloaders down the chain" as
+degradation thinning out life. Per thousand cells the density *rises* down the
+chain, and standalone universes of the same sizes give the same densities. The
+count fell because the world shrank.
 
 **What it is not.** Nothing here builds a computer. The model shows the
 precondition is available, not that the achievement follows. "The cosmic role
@@ -211,22 +251,25 @@ The toy already exhibits a small version of this: the rule is stated as density
 bands, and moving those bands even slightly turns a world that produces
 structure into one that dies or saturates.
 
-**In the code:** `sweep`. The rule's density bands are the constants, and both
-band centres are swept across a grid; each setting gets its own universe and is
-scored on whether it ends up neither empty nor saturated, still changing, and
-spatially structured.
+**In the code:** `sweep` and `measure`. The rule's density bands are the
+constants. Every law the band form can state (2116) and a sample of the
+outer-totalistic family it cannot (500 of 2¹⁸) are scored under three
+criteria, and the productive share is reported under five ways of weighting
+laws.
 
-**What would falsify it within the model:** complexity turning out to be common.
-The fine-tuning claim needs the productive band to be narrow, and a sweep
-finding most laws productive would refute it. Productive laws are a minority
-under every criterion tried, in every seed, so the claim survives in this model.
-How small a minority does not survive scrutiny as a single number. Under the
-Conway-calibrated bar it is 9% on average across twenty seeds; under two
-criteria that never look at Conway, it is 28% to 33%. Seed 42 alone gave the
-19% that was first reported as the answer. Two cautions travel with that number: the bar is calibrated from Conway
-and so measures resemblance rather than worth, and the productive fraction must
-be counted over *distinct laws* rather than grid area, since a neighbourhood of
-eight cells only admits densities k/8 and 441 settings collapse onto 42 laws.
+**What would falsify it within the model:** complexity turning out to be
+common. In the baseline universe productive laws are a minority under every
+prior and criterion in every seed, so that much survives there. It does not
+survive a change of universe: at a larger world or a shorter run the
+perturbation-growth criterion admits a majority of the band family (60% and
+63%), so under that criterion complexity *is* common in two of the six
+settings tried. How small a minority does not survive as a number either:
+from 5.5% (all band laws, the Conway-resemblance bar) to 45% (all band laws,
+perturbation growth), a factor of eight that is the prior's and the criterion's
+as much as the laws'. v0.5's "19%" was one prior, one criterion, one seed, and
+is withdrawn. Nothing in the model privileges one way of counting laws, and
+that absence is the honest content of the fine-tuning argument as it stands
+here: the measure problem is not resolved by running a toy, it is exhibited.
 
 ---
 

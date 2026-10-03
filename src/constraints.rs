@@ -93,6 +93,61 @@ impl Constraints {
     }
 }
 
+/// How an unobserved block's density advances while nothing computes its
+/// cells.
+///
+/// Lazy rendering says unobserved regions are not computed in detail. It does
+/// not say what stands in for them, and the choice is an **assumption of the
+/// model**, not a consequence of the theory: every result about lazy rendering
+/// is a result about lazy rendering *under one of these closures*. The
+/// experiment therefore runs the lazy settings under each and reports them side
+/// by side.
+///
+/// - `Indicator` is what v0.1–v0.9 shipped: the rule's birth and survival
+///   tests applied to the mean density of the neighbouring blocks. Its doc
+///   comment called it the expected outcome; it is not. A block whose
+///   neighbours sit in the birth band jumps to `(1 - d) + d = 1` in one
+///   substep, and the audit (`docs/audit.md` §1.1) found unobserved ground
+///   oscillating between near-empty and near-full under it. It is kept so the
+///   earlier results can be reproduced and compared, not because it is a
+///   defensible approximation.
+/// - `Binomial` is the expected next density if the block's occupants were
+///   independently alive with the block's own density: the rule averaged over
+///   a binomial neighbour count. This is what a mean field means, and it is
+///   the default from v1.0.
+/// - `Frozen` holds the density constant. Unobserved ground is literally not
+///   computed, which is the cheapest reading of the theory and the one the
+///   viewer's caption ("not being computed at all") describes.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum CoarseRule {
+    Indicator,
+    #[default]
+    Binomial,
+    Frozen,
+}
+
+impl CoarseRule {
+    pub const ALL: [CoarseRule; 3] = [
+        CoarseRule::Binomial,
+        CoarseRule::Indicator,
+        CoarseRule::Frozen,
+    ];
+
+    pub fn label(&self) -> &'static str {
+        match self {
+            CoarseRule::Indicator => "indicator",
+            CoarseRule::Binomial => "binomial",
+            CoarseRule::Frozen => "frozen",
+        }
+    }
+
+    /// The inverse of [`Self::label`].
+    pub fn parse(name: &str) -> Option<CoarseRule> {
+        CoarseRule::ALL.into_iter().find(|r| r.label() == name)
+    }
+}
+
 /// The magnitudes behind the toggles. These are the creator's dials; the
 /// toggles only choose which end of each dial is used.
 #[derive(Clone, Copy, Debug, Deserialize)]
@@ -108,6 +163,9 @@ pub struct Params {
     pub uncapped_radius: usize,
     /// Edge length, in base cells, of a lazily rendered region.
     pub block_size: usize,
+    /// What stands in for an unobserved block's cells. See [`CoarseRule`].
+    #[serde(default)]
+    pub coarse_rule: CoarseRule,
 }
 
 impl Default for Params {
@@ -118,6 +176,7 @@ impl Default for Params {
             capped_radius: 1,
             uncapped_radius: 3,
             block_size: 16,
+            coarse_rule: CoarseRule::default(),
         }
     }
 }
@@ -137,6 +196,7 @@ pub struct Resolved {
     pub radius: usize,
     pub block_size: usize,
     pub lazy: bool,
+    pub coarse_rule: CoarseRule,
 }
 
 impl Resolved {
@@ -152,6 +212,26 @@ impl Resolved {
             },
             block_size: p.block_size * subdivision,
             lazy: c.lazy_rendering,
+            coarse_rule: p.coarse_rule,
+        }
+    }
+
+    /// Neighbours a cell reads per substep: the Moore neighbourhood of this
+    /// radius, less the cell itself.
+    pub fn neighbours(&self) -> u64 {
+        ((2 * self.radius + 1) * (2 * self.radius + 1) - 1) as u64
+    }
+
+    /// Neighbour visits one unobserved block costs per substep.
+    ///
+    /// The indicator and binomial closures read the eight neighbouring block
+    /// densities; a frozen block reads nothing. This is the whole of lazy
+    /// rendering's cost arithmetic and `layer::predict_work` relies on it
+    /// being exact.
+    pub fn coarse_visits(&self) -> u64 {
+        match self.coarse_rule {
+            CoarseRule::Indicator | CoarseRule::Binomial => 8,
+            CoarseRule::Frozen => 0,
         }
     }
 
@@ -215,5 +295,36 @@ mod tests {
         both.discrete_space = false;
         let b = Resolved::new(&both, &p);
         assert!(b.influence_speed() <= ft.influence_speed());
+    }
+
+    #[test]
+    fn the_default_closure_is_binomial_and_every_closure_has_a_label() {
+        assert_eq!(Params::default().coarse_rule, CoarseRule::Binomial);
+        let labels: std::collections::BTreeSet<&str> =
+            CoarseRule::ALL.iter().map(|r| r.label()).collect();
+        assert_eq!(labels.len(), 3);
+    }
+
+    #[test]
+    fn labels_round_trip_through_parse() {
+        for r in CoarseRule::ALL {
+            assert_eq!(CoarseRule::parse(r.label()), Some(r));
+        }
+        assert_eq!(CoarseRule::parse("nonsense"), None);
+    }
+
+    #[test]
+    fn a_frozen_block_costs_nothing_to_advance() {
+        let p = Params {
+            coarse_rule: CoarseRule::Frozen,
+            ..Params::default()
+        };
+        assert_eq!(Resolved::new(&Constraints::ALL_ON, &p).coarse_visits(), 0);
+        assert_eq!(
+            Resolved::new(&Constraints::ALL_ON, &Params::default()).coarse_visits(),
+            8
+        );
+        assert_eq!(Resolved::new(&Constraints::ALL_ON, &p).neighbours(), 8);
+        assert_eq!(Resolved::new(&Constraints::ALL_OFF, &p).neighbours(), 48);
     }
 }

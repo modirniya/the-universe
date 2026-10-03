@@ -1,0 +1,38 @@
+# Theory 6: the measure problem.
+#
+# A "productive fraction" of laws is a number only once someone says what
+# counts as one law and how laws are weighted. This scores every rule the band
+# form can express (2116 laws) and a fixed sample of the 2^18 life-like rules
+# it cannot, under the three criteria of the sweep, and reports the share under
+# five priors. Then it scores the band family again in six other universes.
+#
+# Costly: about two minutes per seed for the priors on a laptop core, and the
+# sensitivity runs on the first 3 seeds only. Lazy rendering is off and the
+# whole world is observed, as in the sweep.
+
+[world]
+width = 64
+height = 64
+ticks = 80
+seed = 42
+seeds = 20           # the priors run on every seed; sensitivity on the first 3
+seed_stride = 1000
+init_density = 0.30
+
+[params]
+subdivision = 2
+substeps = 2
+capped_radius = 1
+uncapped_radius = 3
+block_size = 16
+coarse_rule = "binomial"  # irrelevant here: every block is observed
+
+[observer]
+x = 0
+y = 0
+width = 64
+height = 64
+
+[report]
+macro_grid = 16
+out_dir = "out/measure"

@@ -1,28 +1,22 @@
-//! The benchmark harness: the part that turns Theory 1 into a claim you can
-//! check.
+//! Running one universe, and running many: the primitives every experiment
+//! shares.
 //!
-//! The question is whether a creator's limits make a universe cheaper *without
-//! changing what it produces*. So the reference run is the universe with no
-//! limits at all — the expensive, maximally faithful one — and every other run
-//! is judged against it on two axes:
+//! [`run`] is the loop that is the whole model: observe, which forces detail
+//! into existence where something is looking; apply the laws; record what an
+//! outside observer could have seen. It returns a [`RunResult`] holding the
+//! macro trace, the cost counters and a [`Profile`] of macro-scale observables
+//! averaged over the second half of the run.
 //!
-//! - **Cost**, in neighbour visits (machine-independent, reproducible) and
-//!   wall time (neither, reported anyway because it is what a creator would
-//!   actually pay).
-//! - **Divergence**, the mean absolute difference between macro density fields
-//!   at the logging threshold. This is the only fair comparison available
-//!   between worlds running at different internal resolutions.
+//! [`per_seed`] runs any experiment once per ensemble seed, the pinned seed
+//! first and alone, the rest in parallel. [`Spread`] is the oldest summary in
+//! the repository; [`crate::stats::Summary`] is the fuller one.
 //!
-//! A limit that costs little and diverges little is a free lunch: a creator
-//! would take it and no inhabitant could tell. A limit that diverges sharply
-//! is not a free lunch, and the model says so rather than hiding it.
-//!
-//! Falsified within the model if: no constraint achieves a large cost saving
-//! at low divergence. Then limits-as-optimizations buys the creator nothing,
-//! and Theory 1 fails on its own terms.
+//! The Theory 1 experiment itself — the factorial over the four limits, its
+//! null models and its cost–fidelity analysis — lives in [`crate::limits`].
 
 use crate::config::Config;
 use crate::constraints::{Constraints, Resolved};
+use crate::observables::{Accumulator, Profile};
 use crate::observer::observe;
 use crate::physics::{Work, tick};
 use crate::space::{Geometry, World, macro_divergence};
@@ -50,27 +44,52 @@ pub struct RunResult {
     pub macro_trace: Vec<Vec<f64>>,
     /// Occupancy of the whole world after each tick.
     pub live_trace: Vec<f64>,
+    /// Macro-scale observables averaged over the second half of the run.
+    pub profile: Profile,
 }
 
 impl RunResult {
+    /// Ticks the run lasted, as recorded.
+    pub fn ticks(&self) -> usize {
+        self.macro_trace.len()
+    }
+
+    /// The first tick of the second half: where the transient is treated as
+    /// over and the window every late-time statistic uses begins.
+    pub fn half(&self) -> usize {
+        self.ticks() / 2
+    }
+
     /// Mean divergence from another run across the whole history.
+    ///
+    /// Kept for comparison with the v0.9 figures. When the two runs share a
+    /// seed this is dominated by the shared start; prefer
+    /// [`Self::divergence_from_tick`] with [`Self::half`].
     pub fn divergence_from(&self, other: &RunResult) -> f64 {
+        self.divergence_from_tick(other, 0)
+    }
+
+    /// Mean divergence from another run over ticks `from..`.
+    pub fn divergence_from_tick(&self, other: &RunResult, from: usize) -> f64 {
         let n = self.macro_trace.len().min(other.macro_trace.len());
-        if n == 0 {
-            return 0.0;
+        if from >= n {
+            return f64::NAN;
         }
-        (0..n)
+        (from..n)
             .map(|t| macro_divergence(&self.macro_trace[t], &other.macro_trace[t]))
             .sum::<f64>()
-            / n as f64
+            / (n - from) as f64
+    }
+
+    /// Divergence from another run at every shared tick.
+    pub fn divergence_trace(&self, other: &RunResult) -> Vec<f64> {
+        let n = self.macro_trace.len().min(other.macro_trace.len());
+        (0..n)
+            .map(|t| macro_divergence(&self.macro_trace[t], &other.macro_trace[t]))
+            .collect()
     }
 
     /// Mean absolute difference in total occupancy across the run.
-    ///
-    /// Where `divergence_from` asks whether the same things are in the same
-    /// places, this asks only whether the universes hold the same *amount* of
-    /// structure. Two chaotic universes decorrelate in position long before
-    /// they disagree in aggregate, so this is the measure that survives chaos.
     pub fn live_delta_from(&self, other: &RunResult) -> f64 {
         let n = self.live_trace.len().min(other.live_trace.len());
         if n == 0 {
@@ -82,8 +101,7 @@ impl RunResult {
             / n as f64
     }
 
-    /// Divergence at the last shared tick: how different the two universes
-    /// ended up, rather than how differently they travelled.
+    /// Divergence at the last shared tick.
     pub fn final_divergence_from(&self, other: &RunResult) -> f64 {
         let n = self.macro_trace.len().min(other.macro_trace.len());
         if n == 0 {
@@ -91,14 +109,25 @@ impl RunResult {
         }
         macro_divergence(&self.macro_trace[n - 1], &other.macro_trace[n - 1])
     }
+
+    /// Drop the per-tick traces, keeping everything computed from them.
+    pub fn without_traces(mut self) -> RunResult {
+        self.macro_trace = Vec::new();
+        self.live_trace = Vec::new();
+        self
+    }
 }
 
-/// Run one universe start to finish.
+/// Run one universe start to finish, optionally from an altered initial
+/// world.
 ///
-/// The loop is the whole model in six lines: observe, which forces detail into
-/// existence where something is looking; then apply the laws; then record what
-/// an outside observer would have been able to see.
-pub fn run(cfg: &Config, constraints: Constraints) -> RunResult {
+/// `prepare` is applied to the seeded world before the first tick. The null
+/// models use it to flip one cell; everything else passes the identity.
+pub fn run_with(
+    cfg: &Config,
+    constraints: Constraints,
+    prepare: impl FnOnce(&mut World),
+) -> RunResult {
     let res = Resolved::new(&constraints, &cfg.params);
     let geom = Geometry::new(
         cfg.world.width,
@@ -108,9 +137,14 @@ pub fn run(cfg: &Config, constraints: Constraints) -> RunResult {
     );
 
     let mut world = World::seed(geom, cfg.world.seed, cfg.world.init_density);
+    prepare(&mut world);
+    world.sync_coarse_from_cells();
+
     let mut work = Work::default();
     let mut macro_trace = Vec::with_capacity(cfg.world.ticks as usize);
     let mut live_trace = Vec::with_capacity(cfg.world.ticks as usize);
+    let mut acc = Accumulator::new();
+    let half = (cfg.world.ticks / 2) as usize;
 
     // Peak is sampled after the first observation, never at construction.
     // `World::seed` materialises every cell because it is easier to write
@@ -128,7 +162,12 @@ pub fn run(cfg: &Config, constraints: Constraints) -> RunResult {
         work.add(render_work);
         work.add(physics_work);
         peak_live = peak_live.max(observed.live_state_bytes());
-        macro_trace.push(advanced.macro_field(cfg.report.macro_grid));
+        let field = advanced.macro_field(cfg.report.macro_grid);
+        if t as usize >= half {
+            let prev = macro_trace.last().map(|v: &Vec<f64>| v.as_slice());
+            acc.push(&advanced, &field, prev, cfg.report.macro_grid);
+        }
+        macro_trace.push(field);
         live_trace.push(advanced.live_fraction());
         world = advanced;
     }
@@ -147,91 +186,13 @@ pub fn run(cfg: &Config, constraints: Constraints) -> RunResult {
         final_live_fraction: world.live_fraction(),
         macro_trace,
         live_trace,
+        profile: acc.mean(),
     }
 }
 
-/// One run measured against the unconstrained reference.
-#[derive(Clone, Debug)]
-pub struct Comparison {
-    pub run: RunResult,
-    /// Neighbour visits as a fraction of the reference's. Below 1 is cheaper.
-    pub work_ratio: f64,
-    /// Wall time as a fraction of the reference's.
-    pub time_ratio: f64,
-    /// Peak live bytes as a fraction of the reference's.
-    pub memory_ratio: f64,
-    pub mean_divergence: f64,
-    pub final_divergence: f64,
-    /// Difference in total occupancy: the chaos-resistant measure.
-    pub live_delta: f64,
-}
-
-/// The full experiment: the unconstrained universe, each single limit, and all
-/// limits together.
-#[derive(Clone, Debug)]
-pub struct Experiment {
-    pub reference: RunResult,
-    pub comparisons: Vec<Comparison>,
-    /// Macro divergence between two unconstrained universes that differ only
-    /// in seed. See [`run_all`].
-    pub chaos_floor: f64,
-    /// The same control, measured in total occupancy.
-    pub chaos_floor_live: f64,
-}
-
-/// Run the reference universe, every single limit, all limits together, and a
-/// control.
-///
-/// The control is the part that makes the rest mean anything. This world is
-/// chaotic: perturb it however slightly and the macro field decorrelates,
-/// so a large divergence number on its own says nothing about whether a limit
-/// changed the universe. To calibrate, the reference is run a second time with
-/// nothing altered but the seed. Those two universes are unquestionably the
-/// same *kind* of universe, and the divergence between them is the floor that
-/// chaos alone produces. A limit is only meaningfully visible if it diverges by
-/// more than that.
-pub fn run_all(cfg: &Config, mut on_run: impl FnMut(&str)) -> Experiment {
-    on_run(&Constraints::ALL_OFF.label());
-    let reference = run(cfg, Constraints::ALL_OFF);
-
-    on_run("control (reference, different seed)");
-    let control = {
-        let mut c = cfg.clone();
-        c.world.seed = cfg.world.seed.wrapping_add(1);
-        run(&c, Constraints::ALL_OFF)
-    };
-    let chaos_floor = control.divergence_from(&reference);
-    let chaos_floor_live = control.live_delta_from(&reference);
-
-    let mut settings = Constraints::singles();
-    settings.push(Constraints::ALL_ON);
-
-    let comparisons = settings
-        .into_iter()
-        .map(|c| {
-            on_run(&c.label());
-            let r = run(cfg, c);
-            Comparison {
-                work_ratio: ratio(
-                    r.work.neighbor_visits as f64,
-                    reference.work.neighbor_visits as f64,
-                ),
-                time_ratio: ratio(r.wall_ms, reference.wall_ms),
-                memory_ratio: ratio(r.peak_live_bytes as f64, reference.peak_live_bytes as f64),
-                mean_divergence: r.divergence_from(&reference),
-                final_divergence: r.final_divergence_from(&reference),
-                live_delta: r.live_delta_from(&reference),
-                run: r,
-            }
-        })
-        .collect();
-
-    Experiment {
-        reference,
-        comparisons,
-        chaos_floor,
-        chaos_floor_live,
-    }
+/// Run one universe start to finish.
+pub fn run(cfg: &Config, constraints: Constraints) -> RunResult {
+    run_with(cfg, constraints, |_| {})
 }
 
 // ---------------------------------------------------------------------------
@@ -306,7 +267,8 @@ pub fn per_seed<T: Send>(cfg: &Config, f: impl Fn(&Config) -> T + Sync) -> Vec<(
 /// Mean, minimum and maximum of one quantity across an ensemble.
 ///
 /// Non-finite values are left out and not counted, so `n` says how many
-/// members the summary actually rests on.
+/// members the summary actually rests on. See [`crate::stats::Summary`] for
+/// the version with a dispersion and an interval.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Spread {
     pub mean: f64,
@@ -345,94 +307,6 @@ impl Spread {
     }
 }
 
-/// Theory 1 run once per seed.
-#[derive(Clone, Debug)]
-pub struct Ensemble {
-    /// One experiment per seed, pinned seed first. Traces are dropped: the
-    /// ensemble keeps what was computed from them, not the fields themselves.
-    pub runs: Vec<(u64, Experiment)>,
-}
-
-impl Ensemble {
-    /// Labels of the compared settings, in the order every member ran them.
-    pub fn labels(&self) -> Vec<String> {
-        self.runs
-            .first()
-            .map(|(_, e)| e.comparisons.iter().map(|c| c.run.label.clone()).collect())
-            .unwrap_or_default()
-    }
-
-    fn values<'a>(
-        &'a self,
-        label: &'a str,
-        f: impl Fn(&Comparison, &Experiment) -> f64 + 'a,
-    ) -> impl Iterator<Item = f64> + 'a {
-        self.runs.iter().filter_map(move |(_, e)| {
-            e.comparisons
-                .iter()
-                .find(|c| c.run.label == label)
-                .map(|c| f(c, e))
-        })
-    }
-
-    /// One quantity of one setting, summarised across seeds.
-    pub fn spread(&self, label: &str, f: impl Fn(&Comparison, &Experiment) -> f64) -> Spread {
-        Spread::of(self.values(label, f))
-    }
-
-    /// How many seeds satisfy a condition on one setting.
-    pub fn count(&self, label: &str, pred: impl Fn(&Comparison, &Experiment) -> bool) -> usize {
-        self.values(label, move |c, e| f64::from(u8::from(pred(c, e))))
-            .filter(|v| *v > 0.0)
-            .count()
-    }
-
-    /// The chaos floor itself, as a distribution rather than one pair.
-    pub fn floor(&self) -> Spread {
-        Spread::of(self.runs.iter().map(|(_, e)| e.chaos_floor))
-    }
-
-    pub fn len(&self) -> usize {
-        self.runs.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.runs.is_empty()
-    }
-}
-
-/// Divergence of one comparison as a multiple of its own seed's chaos floor.
-pub fn vs_floor(c: &Comparison, e: &Experiment) -> f64 {
-    if e.chaos_floor == 0.0 {
-        f64::NAN
-    } else {
-        c.mean_divergence / e.chaos_floor
-    }
-}
-
-/// Run the whole Theory 1 experiment once per ensemble seed.
-///
-/// Each member carries its own control, so each limit is judged against the
-/// floor of the universe it actually ran in.
-pub fn run_ensemble(cfg: &Config, on_seed: impl Fn(u64) + Sync) -> Ensemble {
-    let runs = per_seed(cfg, |c| {
-        on_seed(c.world.seed);
-        let mut e = run_all(c, |_| {});
-        e.reference.macro_trace = Vec::new();
-        e.reference.live_trace = Vec::new();
-        for comp in &mut e.comparisons {
-            comp.run.macro_trace = Vec::new();
-            comp.run.live_trace = Vec::new();
-        }
-        e
-    });
-    Ensemble { runs }
-}
-
-fn ratio(a: f64, b: f64) -> f64 {
-    if b == 0.0 { f64::NAN } else { a / b }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -442,7 +316,7 @@ mod tests {
     use crate::observer::Probe;
     use crate::physics::Rules;
 
-    fn cfg() -> Config {
+    pub(crate) fn cfg() -> Config {
         Config {
             world: WorldCfg {
                 width: 32,
@@ -477,6 +351,7 @@ mod tests {
         let b = run(&cfg(), Constraints::ALL_ON);
         assert_eq!(a.work, b.work);
         assert_eq!(a.macro_trace, b.macro_trace);
+        assert_eq!(a.profile, b.profile);
     }
 
     #[test]
@@ -519,6 +394,14 @@ mod tests {
     fn the_reference_diverges_from_itself_by_nothing() {
         let r = run(&cfg(), Constraints::ALL_OFF);
         assert_eq!(r.divergence_from(&r), 0.0);
+        assert_eq!(r.divergence_from_tick(&r, r.half()), 0.0);
+        assert!(r.divergence_trace(&r).iter().all(|d| *d == 0.0));
+    }
+
+    #[test]
+    fn a_window_past_the_end_is_not_a_number() {
+        let r = run(&cfg(), Constraints::ALL_OFF);
+        assert!(r.divergence_from_tick(&r, r.ticks()).is_nan());
     }
 
     #[test]
@@ -534,40 +417,25 @@ mod tests {
     }
 
     #[test]
-    fn run_all_covers_every_setting() {
-        let mut seen = Vec::new();
-        let e = run_all(&cfg(), |l| seen.push(l.to_string()));
-        assert_eq!(e.comparisons.len(), 5);
-        assert_eq!(seen.len(), 7, "reference, control, then five variants");
-        assert!(e.comparisons.iter().any(|c| c.run.label == "all_on"));
+    fn the_profile_covers_the_second_half_only() {
+        let c = cfg();
+        let r = run(&c, Constraints::ALL_OFF);
+        // Occupancy in the profile is the mean of the second-half live trace.
+        let h = r.half();
+        let want = r.live_trace[h..].iter().sum::<f64>() / (r.ticks() - h) as f64;
+        assert!((r.profile.occupancy - want).abs() < 1e-12);
     }
 
     #[test]
-    fn the_control_establishes_a_nonzero_chaos_floor() {
-        // If re-seeding the reference produced no divergence, the divergence
-        // column would be meaningless and every limit would look damning.
-        let e = run_all(&cfg(), |_| {});
-        assert!(
-            e.chaos_floor > 0.0,
-            "a chaotic world must decorrelate on reseed"
+    fn a_prepared_world_runs_differently_from_an_unprepared_one() {
+        let c = cfg();
+        let plain = run(&c, Constraints::ALL_OFF);
+        let flipped = run_with(&c, Constraints::ALL_OFF, |w| w.cells[0] ^= 1);
+        assert_ne!(plain.macro_trace, flipped.macro_trace);
+        assert_eq!(
+            plain.work, flipped.work,
+            "a flipped cell costs nothing extra"
         );
-        assert!(e.chaos_floor.is_finite());
-    }
-
-    #[test]
-    fn run_all_is_reproducible_including_its_control() {
-        let a = run_all(&cfg(), |_| {});
-        let b = run_all(&cfg(), |_| {});
-        assert_eq!(a.chaos_floor, b.chaos_floor);
-        assert_eq!(a.chaos_floor_live, b.chaos_floor_live);
-    }
-
-    #[test]
-    fn occupancy_divergence_survives_where_field_divergence_saturates() {
-        // Two runs that decorrelate in position can still agree closely on
-        // how much structure they hold; that is the point of `live_delta`.
-        let e = run_all(&cfg(), |_| {});
-        assert!(e.chaos_floor_live <= e.chaos_floor + 1e-9);
     }
 
     #[test]
@@ -590,36 +458,6 @@ mod tests {
         for ((s, v), want) in got.iter().zip(&seeds) {
             assert_eq!(s, want);
             assert_eq!(*v, want * 3);
-        }
-    }
-
-    #[test]
-    fn an_ensemble_is_reproducible_across_thread_schedules() {
-        let mut c = cfg();
-        c.world.seeds = 5;
-        let a = run_ensemble(&c, |_| {});
-        let b = run_ensemble(&c, |_| {});
-        for ((sa, ea), (sb, eb)) in a.runs.iter().zip(&b.runs) {
-            assert_eq!(sa, sb);
-            assert_eq!(ea.chaos_floor, eb.chaos_floor);
-            for (x, y) in ea.comparisons.iter().zip(&eb.comparisons) {
-                assert_eq!(x.mean_divergence, y.mean_divergence);
-                assert_eq!(x.run.work, y.run.work);
-            }
-        }
-    }
-
-    #[test]
-    fn an_ensemble_of_one_is_the_pinned_run() {
-        let single = run_all(&cfg(), |_| {});
-        let ens = run_ensemble(&cfg(), |_| {});
-        assert_eq!(ens.len(), 1);
-        let (seed, e) = &ens.runs[0];
-        assert_eq!(*seed, cfg().world.seed);
-        assert_eq!(e.chaos_floor, single.chaos_floor);
-        for (x, y) in e.comparisons.iter().zip(&single.comparisons) {
-            assert_eq!(x.work_ratio, y.work_ratio);
-            assert_eq!(x.mean_divergence, y.mean_divergence);
         }
     }
 

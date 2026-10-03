@@ -125,9 +125,9 @@ pub const STERILE_CHURN: f64 = 0.001;
 ///
 /// Not an estimate. It lays out the same geometry the run will use and counts
 /// what each block costs: an observed block pays per cell, an unobserved one
-/// pays eight visits however large it is. That is the whole of lazy rendering's
-/// arithmetic, so the number here is what the layer actually spends, which is
-/// what makes it usable as a budget check rather than a guess.
+/// pays [`Resolved::coarse_visits`] however large it is. That is the whole of
+/// lazy rendering's arithmetic, so the number here is what the layer actually
+/// spends, which is what makes it usable as a budget check rather than a guess.
 ///
 /// The probe must be the one that layer will run with, not the root's: a
 /// smaller world observed by an unscaled probe would resolve a quite different
@@ -135,7 +135,7 @@ pub const STERILE_CHURN: f64 = 0.001;
 pub fn predict_work(spec: &LayerSpec, probe: &Probe, cfg: &Config) -> u64 {
     let res = Resolved::new(&Constraints::ALL_ON, &cfg.params);
     let geom = Geometry::new(spec.width, spec.height, res.subdivision, res.block_size);
-    let neighbours = ((2 * res.radius + 1) * (2 * res.radius + 1) - 1) as u64;
+    let neighbours = res.neighbours();
     let observed = probe.observed_blocks(&geom);
 
     let per_substep: u64 = (0..geom.blocks())
@@ -143,7 +143,7 @@ pub fn predict_work(spec: &LayerSpec, probe: &Probe, cfg: &Config) -> u64 {
             if observed[b] {
                 geom.block_cells(b) as u64 * neighbours
             } else {
-                8
+                res.coarse_visits()
             }
         })
         .sum();
@@ -237,8 +237,8 @@ pub fn build(root_budget: Budget, root: &LayerSpec, deg: &Degradation, cfg: &Con
     layers
 }
 
-/// Mean tick-to-tick change in the macro field.
-fn churn_of(r: &RunResult) -> f64 {
+/// Mean tick-to-tick change in the macro field over the whole run.
+pub fn churn_of(r: &RunResult) -> f64 {
     if r.macro_trace.len() < 2 {
         return 0.0;
     }
@@ -303,6 +303,295 @@ pub fn run_chain(
         total_work,
         total_cost_bound: deg.total_cost_bound(root_budget),
     }
+}
+
+// ---------------------------------------------------------------------------
+// Where a plain chain ends, without running any physics
+// ---------------------------------------------------------------------------
+
+/// Why a chain built by [`build`] stopped.
+///
+/// All three are consequences of the definitions: the budget rule, the size
+/// floor and the block partition are each a line in the config, and
+/// [`predict_work`] is exact, so a chain's ending can be computed without
+/// running a single tick. The map exists to show *which* definition binds
+/// where, which is not obvious from reading them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Termination {
+    /// The next child's budget fell below `viable_work`.
+    Budget,
+    /// No world at or above `viable_edge` could be afforded, and none could
+    /// have been even without block quantisation.
+    Space,
+    /// A world at or above `viable_edge` would have fitted the budget if cost
+    /// were proportional to area, but every such world's probe straddled
+    /// enough block boundaries to cost more than the budget. The partition,
+    /// not the floor, ended the chain.
+    Quantisation,
+}
+
+impl Termination {
+    pub fn glyph(&self) -> char {
+        match self {
+            Termination::Budget => '$',
+            Termination::Space => '#',
+            Termination::Quantisation => 'q',
+        }
+    }
+
+    pub fn code(&self) -> &'static str {
+        match self {
+            Termination::Budget => "budget",
+            Termination::Space => "space",
+            Termination::Quantisation => "quantisation",
+        }
+    }
+}
+
+/// One cell of the termination map.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct TerminationCell {
+    pub root_edge: usize,
+    pub block_size: usize,
+    pub fraction: f64,
+    pub viable_edge: usize,
+    /// Layers the chain built.
+    pub built_depth: usize,
+    /// What the geometric closed form allows from the same root budget.
+    pub closed_form_depth: usize,
+    pub ending: Termination,
+}
+
+impl TerminationCell {
+    /// Whether integer flooring of the budgets cost the chain a layer the
+    /// closed form would have allowed, over and above any spatial ending.
+    pub fn truncated(&self) -> bool {
+        self.built_depth < self.closed_form_depth && self.ending == Termination::Budget
+    }
+}
+
+/// Fractions, size floors, block sizes and root edges the map sweeps.
+pub const MAP_FRACTIONS: &[f64] = &[0.1, 0.15, 0.2, 0.25, 0.3, 0.4, 0.5];
+pub const MAP_FLOORS: &[usize] = &[2, 4, 8, 16, 24];
+pub const MAP_BLOCKS: &[usize] = &[4, 8, 16, 32];
+pub const MAP_ROOTS: &[usize] = &[64, 128, 256];
+
+/// What a world of this edge would cost if lazy rendering charged by area
+/// rather than by block: the probe's share of cells at full price, the rest
+/// as coarse blocks.
+pub fn continuous_work(edge: usize, cfg: &Config) -> f64 {
+    let res = Resolved::new(&Constraints::ALL_ON, &cfg.params);
+    let coverage = cfg.observer.coverage(cfg.world.width, cfg.world.height);
+    let cells = (edge * edge * res.subdivision * res.subdivision) as f64;
+    let block = (res.block_size * res.block_size) as f64;
+    let per_substep = coverage * cells * res.neighbours() as f64
+        + (1.0 - coverage) * (cells / block) * res.coarse_visits() as f64;
+    per_substep * cfg.world.ticks as f64 * res.substeps as f64
+}
+
+/// Build the chain analytically at one setting and say why it ended.
+pub fn termination_at(
+    cfg: &Config,
+    root_edge: usize,
+    block_size: usize,
+    fraction: f64,
+    viable_edge: usize,
+) -> TerminationCell {
+    let mut c = cfg.clone();
+    let root_spec = LayerSpec {
+        width: cfg.world.width,
+        height: cfg.world.height,
+        ticks: cfg.world.ticks,
+    };
+    let new_root = LayerSpec {
+        width: root_edge,
+        height: root_edge,
+        ticks: cfg.world.ticks,
+    };
+    c.observer = scale_probe(&cfg.observer, &root_spec, &new_root);
+    c.world.width = root_edge;
+    c.world.height = root_edge;
+    c.params.block_size = block_size;
+    let deg = Degradation {
+        fraction,
+        viable_work: cfg.nesting.viable_work,
+        viable_edge,
+    };
+    let root_budget = Budget::new(predict_work(&new_root, &c.observer, &c));
+    let layers = build(root_budget, &new_root, &deg, &c);
+
+    // Walk the budgets the chain would have handed down, to see what stopped it.
+    let mut budget = root_budget;
+    let mut max_edge = root_edge;
+    let mut ending = Termination::Budget;
+    loop {
+        match fit_spec(budget, &new_root, max_edge, &deg, &c) {
+            None => {
+                ending = if continuous_work(viable_edge, &c) <= budget.work as f64 {
+                    Termination::Quantisation
+                } else {
+                    Termination::Space
+                };
+                break;
+            }
+            Some(spec) => {
+                max_edge = spec.height;
+                match deg.child_of(budget) {
+                    Some(next) => budget = next,
+                    None => break,
+                }
+            }
+        }
+    }
+
+    TerminationCell {
+        root_edge,
+        block_size,
+        fraction,
+        viable_edge,
+        built_depth: layers.len(),
+        // The root is always built: it is given exactly its own cost, so the
+        // work floor applies to its children, not to it. The closed form is
+        // floored at one for the same reason.
+        closed_form_depth: deg.max_depth(root_budget).max(1),
+        ending,
+    }
+}
+
+/// The whole map: every root edge, block size, fraction and floor.
+pub fn map_terminations(cfg: &Config) -> Vec<TerminationCell> {
+    let mut out = Vec::new();
+    for &root in MAP_ROOTS {
+        for &block in MAP_BLOCKS {
+            for &floor in MAP_FLOORS {
+                for &fraction in MAP_FRACTIONS {
+                    out.push(termination_at(cfg, root, block, fraction, floor));
+                }
+            }
+        }
+    }
+    out
+}
+
+// ---------------------------------------------------------------------------
+// The size control: is anything about nesting reaching a layer?
+// ---------------------------------------------------------------------------
+
+/// A layer of the chain beside a standalone universe of the same size, seed
+/// and probe.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SizeControl {
+    pub depth: usize,
+    pub edge: usize,
+    pub layer_churn: f64,
+    pub standalone_churn: f64,
+    pub layer_work: u64,
+    pub standalone_work: u64,
+}
+
+impl SizeControl {
+    /// Whether the two are the same universe. They are, by construction: a
+    /// layer in [`run_chain`] *is* `experiment::run` of a smaller world, and
+    /// nothing about its host reaches it. The control exists to pin that, so
+    /// that "churn falls down the chain" is read as "churn falls with world
+    /// size" and not as a signature of nesting.
+    pub fn identical(&self) -> bool {
+        self.layer_churn == self.standalone_churn && self.layer_work == self.standalone_work
+    }
+}
+
+/// Run each layer's size as a universe of its own and compare.
+pub fn size_control(cfg: &Config, chain: &Chain) -> Vec<SizeControl> {
+    let root = LayerSpec {
+        width: cfg.world.width,
+        height: cfg.world.height,
+        ticks: cfg.world.ticks,
+    };
+    chain
+        .layers
+        .iter()
+        .map(|l| {
+            let r = run_size(cfg, &root, l.layer.spec.height);
+            SizeControl {
+                depth: l.layer.depth,
+                edge: l.layer.spec.height,
+                layer_churn: l.churn,
+                standalone_churn: churn_of(&r),
+                layer_work: l.work.neighbor_visits,
+                standalone_work: r.work.neighbor_visits,
+            }
+        })
+        .collect()
+}
+
+/// One standalone universe of a given edge, with the root's probe rescaled.
+fn run_size(cfg: &Config, root: &LayerSpec, edge: usize) -> RunResult {
+    let aspect = root.width as f64 / root.height as f64;
+    let spec = LayerSpec {
+        width: ((edge as f64) * aspect).round().max(1.0) as usize,
+        height: edge,
+        ticks: root.ticks,
+    };
+    let mut c = cfg.clone();
+    c.world.width = spec.width;
+    c.world.height = spec.height;
+    c.observer = scale_probe(&cfg.observer, root, &spec);
+    run(&c, Constraints::ALL_ON)
+}
+
+/// Churn of a standalone universe at one edge.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SizeRow {
+    pub edge: usize,
+    pub churn: f64,
+    pub occupancy: f64,
+    /// Share of blocks the rescaled probe resolves: how the block partition
+    /// treats this size.
+    pub resolved_share: f64,
+    pub work: u64,
+}
+
+/// Edges the churn-against-size curve samples.
+pub const SIZE_EDGES: &[usize] = &[16, 21, 24, 32, 48, 55, 64, 96, 128];
+
+/// Churn of standalone universes across sizes, at the config's seed.
+///
+/// Every edge the chain could choose is a point on this curve; a layer's
+/// churn is read off it by its size alone.
+pub fn churn_by_size(cfg: &Config) -> Vec<SizeRow> {
+    let root = LayerSpec {
+        width: cfg.world.width,
+        height: cfg.world.height,
+        ticks: cfg.world.ticks,
+    };
+    SIZE_EDGES
+        .iter()
+        .filter(|e| **e <= root.height)
+        .map(|&edge| {
+            let r = run_size(cfg, &root, edge);
+            let geom = Geometry::new(
+                r.fine_cells / (edge * r.resolved.subdivision),
+                edge,
+                r.resolved.subdivision,
+                r.resolved.block_size,
+            );
+            let spec = LayerSpec {
+                width: geom.w / r.resolved.subdivision,
+                height: edge,
+                ticks: root.ticks,
+            };
+            let probe = scale_probe(&cfg.observer, &root, &spec);
+            let observed = probe.observed_blocks(&geom);
+            SizeRow {
+                edge,
+                churn: churn_of(&r),
+                occupancy: r.profile.occupancy,
+                resolved_share: observed.iter().filter(|b| **b).count() as f64
+                    / geom.blocks().max(1) as f64,
+                work: r.work.neighbor_visits,
+            }
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -562,6 +851,83 @@ mod tests {
                     got.height
                 );
             }
+        }
+    }
+
+    /// The layer tests' config with a work floor the small test worlds can
+    /// actually reach; the default floor of a million visits is above what a
+    /// 64x64 world costs here, which would end every chain at the root.
+    fn map_cfg() -> Config {
+        let mut c = cfg();
+        c.nesting.viable_work = 50_000;
+        c
+    }
+
+    #[test]
+    fn the_termination_map_covers_its_grid_and_classifies_every_cell() {
+        let c = map_cfg();
+        let cells = map_terminations(&c);
+        assert_eq!(
+            cells.len(),
+            MAP_ROOTS.len() * MAP_BLOCKS.len() * MAP_FLOORS.len() * MAP_FRACTIONS.len()
+        );
+        for cell in &cells {
+            assert!(cell.built_depth >= 1, "{cell:?}");
+            assert!(cell.built_depth <= cell.closed_form_depth, "{cell:?}");
+        }
+        let kinds: std::collections::BTreeSet<Termination> =
+            cells.iter().map(|c| c.ending).collect();
+        assert!(kinds.contains(&Termination::Budget));
+        assert!(
+            kinds.contains(&Termination::Space) || kinds.contains(&Termination::Quantisation),
+            "some high floor should end a chain on space or on the partition: {kinds:?}"
+        );
+    }
+
+    #[test]
+    fn a_poor_child_dies_of_budget_and_a_high_floor_of_space() {
+        // At a tenth of its host, the child's budget falls under the work floor
+        // before any size floor matters. At half, the budget allows a child but
+        // no world of 48 cells a side costs that little, by area or by block.
+        let c = map_cfg();
+        assert_eq!(
+            termination_at(&c, 64, 8, 0.1, 2).ending,
+            Termination::Budget
+        );
+        let high = termination_at(&c, 64, 8, 0.5, 48);
+        assert_eq!(high.ending, Termination::Space, "{high:?}");
+        assert_eq!(high.built_depth, 1);
+    }
+
+    #[test]
+    fn continuous_work_is_area_scaling() {
+        let c = cfg();
+        let a = continuous_work(32, &c);
+        let b = continuous_work(64, &c);
+        assert!((b / a - 4.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn a_layer_is_a_standalone_universe_of_its_size() {
+        // The control is a tautology, and that is the point: nothing about a
+        // layer's host reaches it, so any trend down a chain is a trend in
+        // world size.
+        let c = cfg();
+        let chain = run_chain(&c, Budget::new(20_000_000), &deg(), |_, _| {});
+        let controls = size_control(&c, &chain);
+        assert_eq!(controls.len(), chain.layers.len());
+        assert!(controls.iter().all(|s| s.identical()), "{controls:?}");
+    }
+
+    #[test]
+    fn the_size_curve_samples_every_edge_at_or_below_the_root() {
+        let mut c = cfg();
+        c.world.ticks = 10;
+        let rows = churn_by_size(&c);
+        assert_eq!(rows.len(), SIZE_EDGES.iter().filter(|e| **e <= 64).count());
+        for r in &rows {
+            assert!(r.churn.is_finite() && r.churn >= 0.0);
+            assert!((0.0..=1.0).contains(&r.resolved_share));
         }
     }
 

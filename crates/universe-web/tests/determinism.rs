@@ -58,3 +58,20 @@ fn lazy_rendering_leaves_most_blocks_coarse() {
         sim.total_blocks()
     );
 }
+
+#[wasm_bindgen_test]
+fn the_page_can_say_what_it_is_running() {
+    let mut sim = universe_web::Sim::new(32, 32, 7.0, 0.3, 16);
+    let toml = sim.config_toml();
+    assert!(toml.contains("seed = 7"));
+    assert!(toml.contains("coarse_rule = \"binomial\""));
+    sim.set_coarse_rule("frozen");
+    assert_eq!(sim.coarse_rule(), "frozen");
+    sim.set_coarse_rule("nonsense");
+    assert_eq!(
+        sim.coarse_rule(),
+        "frozen",
+        "an unknown name changes nothing"
+    );
+    assert!(!universe_web::source_commit().is_empty());
+}

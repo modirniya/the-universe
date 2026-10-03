@@ -7,8 +7,9 @@ use std::process::ExitCode;
 use universe_core::bootloader::{self, Gate};
 use universe_core::budget::Budget;
 use universe_core::config::Config;
-use universe_core::detector::{self, Gaze, Inhabitant};
-use universe_core::{experiment, layer, pipe, report, sweep};
+use universe_core::detector::{self, Inhabitant};
+use universe_core::provenance::Provenance;
+use universe_core::{experiment, information, layer, limits, measure, pipe, report, sweep};
 
 const USAGE: &str = "\
 the-universe — a runnable model of a simulation-hypothesis framework
@@ -21,24 +22,29 @@ USAGE:
     the-universe sweep --config <FILE> [OPTIONS]
     the-universe boot  --config <FILE> [OPTIONS]
     the-universe edge  --config <FILE> [OPTIONS]
+    the-universe measure --config <FILE> [OPTIONS]
 
 COMMANDS:
-    run     Compare an unconstrained universe against one with each limit in
-            force, and report what the limits cost and what they changed.
+    run     Run every setting of the four limits against the unconstrained
+            universe and four null models, and report what each setting
+            costs and how far it moves seven macro-scale observables.
             (Theory 1: limits as optimizations.)
 
     nest    Build a chain of universes, each running on a fraction of its
-            host's budget, and report how deep it gets before it cannot
-            afford another. (Theory 2: nesting and degradation.)
+            host's budget; report how deep it gets, why chains end across
+            fractions, floors, block and root sizes (from the definitions
+            alone), and how each layer compares to a standalone universe of
+            its size. (Theory 2: nesting and degradation.)
 
     pipe    Transmit a universe through a one-way serializing channel and
-            report what survived: whether the arrangement did, whether the
-            timing and magnitude did, and what a parent sees at each logging
-            threshold. (Theory 3: black holes as pipes.)
+            report what survived, in bits: per task, per encoding, against a
+            window elsewhere and against noise. (Theory 3: the horizon as a
+            pipe.)
 
     detect  Measure a universe from inside it, with no access to its config,
-            and report which of its limits leave a fingerprint an inhabitant
-            could find. (Detection.)
+            and test which limits an inhabitant can find: rules calibrated on
+            half the seeds, false-positive rate and power measured on the
+            other half, with a negative control. (Detection.)
 
     sweep   Vary the rule's constants across a grid, score what each setting
             produces, and report what share of the space is worth inhabiting.
@@ -53,6 +59,11 @@ COMMANDS:
             size floors, with and without the bootloader gate, and map why
             each chain stopped: budget, space, or sterility alone.
             (Theories 2 and 5: where poverty and sterility meet.)
+
+    measure Score every band law and a sample of all life-like rules under
+            three criteria, and report the productive share under five ways
+            of weighting laws and in six other universes. (Theory 6: the
+            measure problem.)
 
 OPTIONS:
     --config <FILE>   Universe definition (TOML). Required.
@@ -117,6 +128,8 @@ enum Command {
     Boot,
     /// Theories 2 and 5: where a chain dies of poverty and where of sterility.
     Edge,
+    /// Theory 6: the productive share under five priors.
+    Measure,
 }
 
 /// `Ok(None)` means help was requested.
@@ -136,9 +149,10 @@ fn parse(argv: Vec<String>) -> Result<Option<Args>, String> {
         "sweep" => Command::Sweep,
         "boot" => Command::Boot,
         "edge" => Command::Edge,
+        "measure" => Command::Measure,
         other => {
             return Err(format!(
-                "unknown command `{other}`; the commands are `run`, `nest`, `pipe`, `detect`, `sweep`, `boot` and `edge`"
+                "unknown command `{other}`; the commands are `run`, `nest`, `pipe`, `detect`, `sweep`, `boot`, `edge` and `measure`"
             ));
         }
     };
@@ -222,6 +236,7 @@ fn parse(argv: Vec<String>) -> Result<Option<Args>, String> {
 }
 
 fn execute(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
+    let config_text = std::fs::read_to_string(&args.config)?;
     let mut cfg = Config::load(&args.config)?;
     if let Some(s) = args.seed {
         cfg.world.seed = s;
@@ -239,15 +254,100 @@ fn execute(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
         .clone()
         .unwrap_or_else(|| PathBuf::from(&cfg.report.out_dir));
 
-    match args.command {
-        Command::Run => execute_run(&cfg, &out_dir),
-        Command::Nest => execute_nest(&cfg, &out_dir, args.budget),
-        Command::Pipe => execute_pipe(&cfg, &out_dir),
-        Command::Detect => execute_detect(&cfg, &out_dir),
-        Command::Sweep => execute_sweep(&cfg, &out_dir, args.steps),
-        Command::Boot => execute_boot(&cfg, &out_dir, args.budget),
-        Command::Edge => execute_edge(&cfg, &out_dir, args.budget),
+    let command = match args.command {
+        Command::Run => "run",
+        Command::Nest => "nest",
+        Command::Pipe => "pipe",
+        Command::Detect => "detect",
+        Command::Sweep => "sweep",
+        Command::Boot => "boot",
+        Command::Edge => "edge",
+        Command::Measure => "measure",
+    };
+    // Overrides are part of what produced the numbers, so they are recorded
+    // with the config text they modified.
+    let mut recorded = config_text.clone();
+    if args.seed.is_some() || args.ticks.is_some() || args.seeds.is_some() {
+        recorded.push_str(&format!(
+            "\n# command-line overrides: seed={:?} ticks={:?} seeds={:?}\n",
+            args.seed, args.ticks, args.seeds
+        ));
     }
+    let provenance = Provenance::new(command, &args.config, &recorded, &cfg);
+
+    match args.command {
+        Command::Run => execute_run(&cfg, &out_dir)?,
+        Command::Nest => execute_nest(&cfg, &out_dir, args.budget)?,
+        Command::Pipe => execute_pipe(&cfg, &out_dir)?,
+        Command::Detect => execute_detect(&cfg, &out_dir)?,
+        Command::Sweep => execute_sweep(&cfg, &out_dir, args.steps)?,
+        Command::Boot => execute_boot(&cfg, &out_dir, args.budget)?,
+        Command::Edge => execute_edge(&cfg, &out_dir, args.budget)?,
+        Command::Measure => execute_measure(&cfg, &out_dir)?,
+    }
+
+    let path = provenance.write(&out_dir)?;
+    println!(
+        "wrote {} (commit {}{}, {}, experiment design v{})",
+        path.display(),
+        &provenance.commit[..provenance.commit.len().min(12)],
+        if provenance.dirty == "true" {
+            ", dirty tree"
+        } else {
+            ""
+        },
+        provenance.target,
+        provenance.experiment_version
+    );
+    Ok(())
+}
+
+fn execute_measure(cfg: &Config, out_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    println!(
+        "each universe: {}x{} base cells, {} ticks, seed {}; {} band laws and {} life-like rules",
+        cfg.world.width,
+        cfg.world.height,
+        cfg.world.ticks,
+        cfg.world.seed,
+        2116,
+        measure::LIFELIKE_SAMPLE
+    );
+    println!("scoring every law under three criteria ...\n");
+
+    let run = measure::run_measure(cfg);
+    print!("{}", report::measure::summary(&run));
+
+    let runs = with_rest(cfg, run, measure::run_measure);
+    if runs.len() > 1 {
+        println!();
+        print!("{}", report::measure::ensemble_summary(&runs));
+    }
+    let written = report::measure::write(&runs, out_dir)?;
+    println!(
+        "\nwrote {}, {} and {}",
+        written.csv.display(),
+        written.json.display(),
+        out_dir.join("laws.csv").display()
+    );
+
+    // The band family in other universes, on the first few seeds.
+    println!("\n== sensitivity ==\n");
+    let mut sens_cfg = cfg.clone();
+    sens_cfg.world.seeds = cfg.world.seeds.min(measure::SENSITIVITY_SEEDS);
+    let settings = |c: &Config| -> Vec<measure::SettingRun> {
+        measure::SETTINGS
+            .iter()
+            .map(|s| measure::run_setting(c, *s))
+            .collect()
+    };
+    let pinned = settings(&sens_cfg);
+    let sens = with_rest(&sens_cfg, pinned, settings);
+    print!("{}", report::measure::sensitivity_summary(&sens));
+    println!(
+        "\nwrote {}",
+        report::measure::write_sensitivity(&sens, out_dir)?.display()
+    );
+    Ok(())
 }
 
 /// Every ensemble member after the pinned one, with the pinned result put back
@@ -349,7 +449,48 @@ fn execute_boot(
         report::write_gate(&chain, &ungated, out_dir)?.display()
     );
 
+    // The controls: what the tracker finds in shuffled frames, and what size
+    // alone does to the density of bootloaders.
+    println!();
+    let shuffle = bootloader::shuffle_control(
+        cfg,
+        &cfg.rules,
+        universe_core::constraints::Constraints::ALL_ON,
+    );
+    print!("{}", report::boot::shuffle_summary(&shuffle));
+    println!();
+    let area = bootloader::area_control(cfg, &chain);
+    print!("{}", report::boot::area_summary(&area));
+    println!(
+        "wrote {}",
+        report::boot::write_controls(&shuffle, &area, out_dir)?.display()
+    );
+
     if cfg.world.seeds > 1 {
+        let shuffles = with_rest(cfg, shuffle, |c| {
+            bootloader::shuffle_control(
+                c,
+                &c.rules,
+                universe_core::constraints::Constraints::ALL_ON,
+            )
+        });
+        println!();
+        print!("{}", report::boot::shuffle_ensemble_summary(&shuffles));
+        println!(
+            "wrote {}",
+            report::boot::write_shuffle(&shuffles, out_dir)?.display()
+        );
+        let areas = with_rest(cfg, area, |c| {
+            let ch = bootloader::run_boot_chain(c, root_budget, &c.nesting, |_, _| {});
+            bootloader::area_control(c, &ch)
+        });
+        println!();
+        print!("{}", report::boot::area_ensemble_summary(&areas));
+        println!(
+            "wrote {}",
+            report::boot::write_area(&areas, out_dir)?.display()
+        );
+
         let runs = with_rest(cfg, (chain, ungated), |c| {
             let run =
                 |gate| bootloader::run_boot_chain_with(c, root_budget, &c.nesting, gate, |_, _| {});
@@ -445,38 +586,29 @@ fn execute_detect(cfg: &Config, out_dir: &Path) -> Result<(), Box<dyn std::error
     };
 
     println!(
-        "universe: {}x{} base cells, {} ticks, seed {}",
-        cfg.world.width, cfg.world.height, cfg.world.ticks, cfg.world.seed
+        "universe: {}x{} base cells, {} ticks, {} seeds from {}",
+        cfg.world.width, cfg.world.height, cfg.world.ticks, cfg.world.seeds, cfg.world.seed
     );
     println!(
-        "inhabitant: {}x{} region at ({}, {})\n",
-        who.width, who.height, who.x, who.y
+        "inhabitant: {}x{} region at ({}, {}); each seed measures {} universes under two gazes\n",
+        who.width,
+        who.height,
+        who.x,
+        who.y,
+        2 * (2 + detector::LIMITS.len() + 1)
     );
 
-    let rendering = detector::investigate_all(cfg, &who, Gaze::Rendering);
-    let passive = detector::investigate_all(cfg, &who, Gaze::Passive);
-    print!("{}", report::detect_report(&rendering, &passive));
+    let survey = detector::survey(cfg, &who, |seed| println!("  measuring seed {seed} ..."));
+    println!();
+    print!("{}", report::detect::summary(&survey));
 
-    let mut all = rendering.clone();
-    all.extend(passive.iter().cloned());
-    let written = report::write_detect(&all, out_dir)?;
+    let written = report::detect::write(&survey, out_dir)?;
     println!(
-        "\nwrote {} and {}",
+        "\nwrote {}, {} and {}",
         written.csv.display(),
-        written.json.display()
+        written.json.display(),
+        out_dir.join("evidence.csv").display()
     );
-
-    if cfg.world.seeds > 1 {
-        let runs = with_rest(cfg, all, |c| {
-            let mut f = detector::investigate_all(c, &who, Gaze::Rendering);
-            f.extend(detector::investigate_all(c, &who, Gaze::Passive));
-            f
-        });
-        print_ensemble(
-            report::detect_ensemble_summary(&runs),
-            report::write_detect_ensemble(&runs, out_dir),
-        )?;
-    }
     Ok(())
 }
 
@@ -505,52 +637,75 @@ fn execute_pipe(cfg: &Config, out_dir: &Path) -> Result<(), Box<dyn std::error::
             report::write_pipe_ensemble(&runs, out_dir),
         )?;
     }
+
+    // What crossed, in bits: per task, per encoding, against the controls.
+    println!("\n== information ==\n");
+    let analysis = information::analyse(cfg, &cfg.horizon);
+    print!("{}", report::information::summary(&analysis));
+    let written = report::information::write(&analysis, out_dir)?;
+    println!(
+        "\nwrote {} and {}",
+        written.csv.display(),
+        written.json.display()
+    );
+    if cfg.world.seeds > 1 {
+        let runs = with_rest(cfg, analysis, |c| information::analyse(c, &c.horizon));
+        print_ensemble(
+            report::information::ensemble_summary(&runs),
+            report::information::write_ensemble(&runs, out_dir),
+        )?;
+    }
     Ok(())
 }
 
 fn execute_run(cfg: &Config, out_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
     println!(
-        "universe: {}x{} base cells, {} ticks, seed {}",
-        cfg.world.width, cfg.world.height, cfg.world.ticks, cfg.world.seed
+        "universe: {}x{} base cells, {} ticks, seed {}; unobserved ground closes under '{}'",
+        cfg.world.width,
+        cfg.world.height,
+        cfg.world.ticks,
+        cfg.world.seed,
+        cfg.params.coarse_rule.label()
     );
     println!(
-        "probe: fixed {}x{} window at ({}, {}), covering {:.1}% of the world\n",
+        "probe: fixed {}x{} window at ({}, {}), covering {:.1}% of the world",
         cfg.observer.width,
         cfg.observer.height,
         cfg.observer.x,
         cfg.observer.y,
         cfg.observer.coverage(cfg.world.width, cfg.world.height) * 100.0
     );
+    println!(
+        "design: all 16 settings of the four limits, 4 nulls, and the lazy settings under the\n\
+         other two closures -- 24 universes per seed\n"
+    );
 
     if cfg.world.seeds == 1 {
-        let exp = experiment::run_all(cfg, |label| {
-            println!("  running {label} ...");
-        });
-
+        let f = limits::run_factorial(cfg, |label| println!("  running {label} ..."));
         println!();
-        print!("{}", report::summary(&exp));
-
-        let written = report::write(&exp, out_dir)?;
+        print!("{}", report::limits::summary(&f));
+        let written = report::limits::write(&f, out_dir)?;
         println!(
-            "\nwrote {} and {}",
+            "\nwrote {}, {} and {}",
             written.csv.display(),
-            written.json.display()
+            written.json.display(),
+            out_dir.join("divergence_trace.csv").display()
         );
         return Ok(());
     }
 
-    let ens = experiment::run_ensemble(cfg, |seed| {
+    let ens = limits::run_ensemble(cfg, |seed| {
         println!("  running every setting at seed {seed} ...");
     });
     let pinned = &ens.runs[0].1;
 
     println!("\npinned seed {}:\n", ens.runs[0].0);
-    print!("{}", report::summary(pinned));
+    print!("{}", report::limits::summary(pinned));
     println!();
-    print!("{}", report::ensemble_summary(&ens));
+    print!("{}", report::limits::ensemble_summary(&ens));
 
-    let written = report::write(pinned, out_dir)?;
-    let ensemble = report::write_ensemble(&ens, out_dir)?;
+    let written = report::limits::write(pinned, out_dir)?;
+    let ensemble = report::limits::write_ensemble(&ens, out_dir)?;
     println!(
         "\nwrote {}, {}, {} and {}",
         written.csv.display(),
@@ -604,6 +759,22 @@ fn execute_nest(
         written.json.display()
     );
 
+    // The size control: a layer beside a standalone universe of its size.
+    println!();
+    let controls = layer::size_control(cfg, &chain);
+    print!("{}", report::nesting::size_control_summary(&controls));
+    let written = report::nesting::write_size_control(&controls, out_dir)?;
+    println!("wrote {}", written.json.display());
+
+    // Where a plain chain ends, from the definitions alone.
+    println!();
+    let cells = layer::map_terminations(cfg);
+    print!("{}", report::nesting::termination_summary(&cells));
+    println!(
+        "wrote {}",
+        report::nesting::write_terminations(&cells, out_dir)?.display()
+    );
+
     if cfg.world.seeds > 1 {
         let runs = with_rest(cfg, chain, |c| {
             layer::run_chain(c, root_budget, &c.nesting, |_, _| {})
@@ -613,6 +784,16 @@ fn execute_nest(
             report::write_chain_ensemble(&runs, out_dir),
         )?;
     }
+
+    // Churn against size for standalone universes, across seeds.
+    println!();
+    let curve = layer::churn_by_size(cfg);
+    let runs = with_rest(cfg, curve, layer::churn_by_size);
+    print!("{}", report::nesting::size_curve_summary(&runs));
+    println!(
+        "wrote {}",
+        report::nesting::write_size_curve(&runs, out_dir)?.display()
+    );
     Ok(())
 }
 
@@ -626,7 +807,9 @@ mod tests {
 
     #[test]
     fn seeds_is_accepted_by_every_command() {
-        for cmd in ["run", "nest", "pipe", "detect", "sweep", "boot"] {
+        for cmd in [
+            "run", "nest", "pipe", "detect", "sweep", "boot", "edge", "measure",
+        ] {
             let a = parse(argv(&format!("{cmd} --config c.toml --seeds 5")))
                 .unwrap()
                 .unwrap();

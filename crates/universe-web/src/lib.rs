@@ -21,7 +21,7 @@
 //! experiment requires. A visitor toggling a limit sees the same universe under
 //! different physics, not a different universe.
 
-use universe_core::constraints::{Constraints, Params, Resolved};
+use universe_core::constraints::{CoarseRule, Constraints, Params, Resolved};
 use universe_core::observer::{Probe, observe};
 use universe_core::physics::{Rules, Work, tick};
 use universe_core::space::{Geometry, World};
@@ -41,6 +41,24 @@ pub fn golden_fingerprint() -> String {
 #[wasm_bindgen]
 pub fn golden_expected() -> String {
     universe_core::golden::GOLDEN_FINGERPRINT.to_string()
+}
+
+/// The source revision this module was built from, so the page can say which
+/// code it is running. The CLI records the same identity in every run's
+/// `metadata.json`.
+#[wasm_bindgen]
+pub fn source_commit() -> String {
+    let dirty = if universe_core::provenance::DIRTY == "true" {
+        " (dirty tree)"
+    } else {
+        ""
+    };
+    format!("{}{dirty}", universe_core::provenance::COMMIT)
+}
+
+#[wasm_bindgen]
+pub fn crate_version() -> String {
+    universe_core::provenance::CRATE_VERSION.to_string()
 }
 
 /// A universe, plus the bookkeeping a viewer needs.
@@ -79,6 +97,7 @@ impl Sim {
             capped_radius: 1,
             uncapped_radius: 3,
             block_size: block_size.max(2),
+            coarse_rule: CoarseRule::default(),
         };
         let constraints = Constraints::ALL_ON;
         let probe = Probe {
@@ -149,6 +168,50 @@ impl Sim {
     pub fn set_seed(&mut self, seed: f64) {
         self.seed = seed as u64;
         self.reset();
+    }
+
+    /// What stands in for an unobserved block: "binomial", "indicator" or
+    /// "frozen". An assumption of the model, exposed as one. Rebuilds.
+    pub fn set_coarse_rule(&mut self, name: &str) {
+        if let Some(rule) = CoarseRule::parse(name) {
+            self.params.coarse_rule = rule;
+            self.reset();
+        }
+    }
+
+    pub fn coarse_rule(&self) -> String {
+        self.params.coarse_rule.label().to_string()
+    }
+
+    /// The universe on screen, as the TOML the CLI would need to run it. The
+    /// page shows this so that what is being watched is never in doubt, and
+    /// so that a visitor can take it to the experiment runner, where the
+    /// published numbers come from.
+    pub fn config_toml(&self) -> String {
+        format!(
+            "[world]\nwidth = {}\nheight = {}\nseed = {}\ninit_density = {:.2}\n\n\
+             [constraints]\ndiscrete_space = {}\ndiscrete_time = {}\nspeed_cap = {}\nlazy_rendering = {}\n\n\
+             [params]\nsubdivision = {}\nsubsteps = {}\ncapped_radius = {}\nuncapped_radius = {}\nblock_size = {}\ncoarse_rule = \"{}\"\n\n\
+             [observer]\nx = {}\ny = {}\nwidth = {}\nheight = {}\n",
+            self.base_w,
+            self.base_h,
+            self.seed,
+            self.density,
+            self.constraints.discrete_space,
+            self.constraints.discrete_time,
+            self.constraints.speed_cap,
+            self.constraints.lazy_rendering,
+            self.params.subdivision,
+            self.params.substeps,
+            self.params.capped_radius,
+            self.params.uncapped_radius,
+            self.params.block_size,
+            self.params.coarse_rule.label(),
+            self.probe.x,
+            self.probe.y,
+            self.probe.width,
+            self.probe.height,
+        )
     }
 
     pub fn set_density(&mut self, density: f64) {

@@ -1,20 +1,31 @@
-//! Detection end to end, using the shipped `configs/detect.toml`.
+//! Detection end to end, using the shipped `configs/detect.toml` at a reduced
+//! seed count.
 //!
 //! Scale matters here in a way it does not elsewhere. An inhabitant measures
 //! the speed of influence by watching how far new life appears from old, and
 //! that takes a universe with enough room and enough history to actually
 //! produce the extreme case. The unit tests run on a small world and can only
 //! check the bound; these run on the shipped one and can check what is reached.
+//!
+//! What is pinned here is what follows from the definitions, plus the
+//! machinery's own invariants. What had to be run — power, false-positive rate,
+//! the exploratory edge statistic — is read from the artifacts and the claims
+//! ledger, not asserted here, because a test that pins a measured number is a
+//! test that the number has not changed, not that it is right.
 
 use std::path::Path;
 
 use universe_core::config::Config;
 use universe_core::constraints::Constraints;
-use universe_core::detector::{self, Gaze, Inhabitant};
+use universe_core::detector::{self, Condition, Direction, Gaze, Inhabitant, Standing};
 use universe_core::report;
 
 fn cfg() -> Config {
-    Config::load(Path::new("configs/detect.toml")).expect("shipped config must load")
+    let mut c = Config::load(Path::new("configs/detect.toml")).expect("shipped config must load");
+    // Eight seeds: four calibrate, four evaluate. Enough to exercise every path
+    // in a debug build; the shipped run uses forty.
+    c.world.seeds = 8;
+    c
 }
 
 /// Straddling the observed region and the coarse ground beyond it.
@@ -28,148 +39,125 @@ fn who(c: &Config) -> Inhabitant {
 }
 
 fn speed(c: &Config, k: Constraints) -> f64 {
-    detector::investigate(c, k, &who(c), Gaze::Rendering).influence_speed
+    detector::investigate(
+        c,
+        Condition {
+            constraints: k,
+            gaze: Gaze::Rendering,
+            resample: false,
+        },
+        &who(c),
+    )
+    .influence_speed
 }
 
 #[test]
 fn the_speed_cap_is_findable_from_inside() {
     let c = cfg();
-    let mut loose = Constraints::ALL_ON;
-    loose.speed_cap = false;
-    assert!(
-        speed(&c, loose) > speed(&c, Constraints::ALL_ON),
-        "a loosened cap should be measurable"
-    );
+    assert!(speed(&c, detector::without("speed_cap")) > speed(&c, Constraints::ALL_ON));
 }
 
 #[test]
 fn coarse_time_and_a_loose_cap_read_identically() {
-    // The v0.1 coupling as a limit on knowledge. Influence reaches
-    // `radius * substeps` cells per tick, and an inhabitant measuring that
-    // distance cannot factor it: three substeps of radius one and one substep
-    // of radius three are the same number.
+    // The v0.1 coupling as a limit on knowledge: the inhabitant measures the
+    // product radius * substeps and cannot factor it. A consequence, checked.
     let mut c = cfg();
     c.params.substeps = 3;
     c.params.uncapped_radius = 3;
-
-    let mut coarse_time = Constraints::ALL_ON;
-    coarse_time.discrete_time = false;
-    let mut fast_light = Constraints::ALL_ON;
-    fast_light.speed_cap = false;
-
     assert_eq!(
-        speed(&c, coarse_time),
-        speed(&c, fast_light),
-        "3x1 and 1x3 are the same product and must read the same"
+        speed(&c, detector::without("discrete_time")),
+        speed(&c, detector::without("speed_cap"))
     );
 }
 
 #[test]
 fn the_reading_never_exceeds_its_bound() {
-    // `radius * substeps` is a ceiling and influence cannot beat it, however
-    // the dials are set.
-    //
-    // Whether the ceiling is *reached* is a different question and not a stable
-    // one: influence needs a live chain to carry it, so how close a reading
-    // gets depends on the world's size, its history, its density, and where the
-    // inhabitant happens to be standing. An earlier version of this test
-    // asserted that a generous bound goes unreached, which held at one
-    // inhabitant placement and failed at another. The ceiling is the invariant;
-    // saturation is a local observation and is reported as one.
     let mut c = cfg();
     for substeps in [1usize, 2, 3, 4] {
         c.params.substeps = substeps;
-        let mut coarse_time = Constraints::ALL_ON;
-        coarse_time.discrete_time = false;
-        let observed = speed(&c, coarse_time);
+        let observed = speed(&c, detector::without("discrete_time"));
         assert!(
             observed <= substeps as f64,
-            "{substeps} substeps of radius 1 read {observed}, above the ceiling"
+            "{substeps} substeps read {observed}"
         );
     }
 }
 
 #[test]
-fn the_shape_of_the_lattice_is_visible_from_inside() {
-    // Influence reaches one cell along an axis and sqrt(2) on a diagonal: the
-    // geometry of a square neighbourhood, read off natural births by an
-    // inhabitant who never sees the rule.
+fn the_shape_of_the_lattice_reads_sqrt_two_at_both_scales() {
+    // Geometry, not a discovery: the corner of a Moore neighbourhood is sqrt(2)
+    // further than its edge whatever the lattice spacing. What had to be run is
+    // that natural births reach the corner at all.
     let c = cfg();
-    let findings = detector::investigate_all(&c, &who(&c), Gaze::Rendering);
-    let iso = detector::isotropy(&findings).expect("discrete_space must be surveyed");
-    assert!(iso.found, "a square lattice should not read as isotropic");
+    let s = detector::survey(&c, &who(&c), |_| {});
+    let iso = s.isotropy.expect("the pinned seed must be measured");
     assert!((iso.lattice - std::f64::consts::SQRT_2).abs() < 1e-9);
+    assert!((iso.finer - std::f64::consts::SQRT_2).abs() < 1e-9);
+    assert_eq!(iso.continuum, 1.0);
 }
 
 #[test]
-fn the_scale_of_the_lattice_stays_hidden() {
-    // A finer lattice is still square, so its shape matches the coarse one.
-    // The inhabitant learns that space is a lattice, not how fine it is.
+fn the_survey_calibrates_and_evaluates_on_disjoint_seeds() {
     let c = cfg();
-    let findings = detector::investigate_all(&c, &who(&c), Gaze::Rendering);
-    let iso = detector::isotropy(&findings).unwrap();
-    assert!(!iso.separates_scale, "{iso:?}");
+    let s = detector::survey(&c, &who(&c), |_| {});
+    assert_eq!(s.evidence.len(), 8);
+    assert_eq!(s.n_cal, 4);
+    assert_eq!(s.n_eval(), 4);
+    for t in &s.tests {
+        assert!(t.rule.n_cal <= s.n_cal);
+        assert!(t.outcome.n_h0 <= s.n_eval() && t.outcome.n_h1 <= s.n_eval());
+    }
 }
 
 #[test]
-fn pixelation_leaves_no_fingerprint() {
+fn consequences_are_labelled_and_exact() {
+    // The speed cap and discrete time move influence_speed by construction, and
+    // a statistic that is the radius cannot miss or false-alarm.
     let c = cfg();
-    let findings = detector::investigate_all(&c, &who(&c), Gaze::Rendering);
-    let space = findings
-        .iter()
-        .find(|f| f.limit == "discrete_space")
-        .expect("discrete_space must be surveyed");
-    assert!(
-        !space.detectable,
-        "the cell is the ruler; subdividing space should leave it unchanged"
-    );
-    assert_eq!(
-        space.signal, "min_feature",
-        "anisotropy did not separate the two lattices, so the ruler stays the signal"
-    );
+    let s = detector::survey(&c, &who(&c), |_| {});
+    for limit in ["speed_cap", "discrete_time"] {
+        let t = s.test(limit, "influence_speed", Gaze::Rendering).unwrap();
+        assert!(matches!(t.standing, Standing::Consequence(_)));
+        assert_eq!(t.mean_h1, 1.0, "{limit}: capped reach is 1 by construction");
+        assert_eq!(t.outcome.tpr(), 1.0, "{limit}");
+        // The false-positive rate is read from the artifacts: whether the
+        // uncapped reach saturates is region-dependent, not a consequence.
+    }
+    // The lattice's scale cannot be read by its shape: the same sqrt(2) on both
+    // sides gives a rule with no direction.
+    let t = s
+        .test("discrete_space", "anisotropy", Gaze::Rendering)
+        .unwrap();
+    assert!(matches!(t.standing, Standing::Consequence(_)));
+    assert_eq!(t.rule.direction, Direction::None);
+    assert_eq!(t.outcome.tpr(), 0.0);
 }
 
 #[test]
-fn looking_conceals_lazy_rendering() {
-    // The observer effect as a measurement. The same inhabitant on the same
-    // ground finds coarse-graining when it can read without rendering, and
-    // none when its looking renders.
+fn the_edge_statistic_is_marked_exploratory() {
     let c = cfg();
-    let rendering = detector::investigate(&c, Constraints::ALL_ON, &who(&c), Gaze::Rendering);
-    let passive = detector::investigate(&c, Constraints::ALL_ON, &who(&c), Gaze::Passive);
-    assert!(
-        passive.smoothness > rendering.smoothness,
-        "passive {} should exceed rendering {}",
-        passive.smoothness,
-        rendering.smoothness
-    );
+    let s = detector::survey(&c, &who(&c), |_| {});
+    let t = s
+        .test("lazy_rendering", "edge_excess", Gaze::Rendering)
+        .unwrap();
+    assert!(matches!(t.standing, Standing::Exploratory(_)));
 }
 
 #[test]
 fn the_survey_is_reproducible() {
     let c = cfg();
-    let a = report::detect_to_csv(&detector::investigate_all(&c, &who(&c), Gaze::Rendering));
-    let b = report::detect_to_csv(&detector::investigate_all(&c, &who(&c), Gaze::Rendering));
+    let a = report::detect::to_csv(&detector::survey(&c, &who(&c), |_| {}));
+    let b = report::detect::to_csv(&detector::survey(&c, &who(&c), |_| {}));
     assert_eq!(a, b);
-}
-
-#[test]
-fn the_report_covers_both_gazes() {
-    let c = cfg();
-    let r = detector::investigate_all(&c, &who(&c), Gaze::Rendering);
-    let p = detector::investigate_all(&c, &who(&c), Gaze::Passive);
-    let text = report::detect_report(&r, &p);
-    assert!(text.contains("looking renders") || text.contains("whose looking renders"));
-    assert!(text.contains("what the difference shows"));
 }
 
 #[test]
 fn the_report_refuses_the_bigger_claim() {
     let c = cfg();
-    let r = detector::investigate_all(&c, &who(&c), Gaze::Rendering);
-    let text = report::detect_summary(&r);
+    let text = report::detect::summary(&detector::survey(&c, &who(&c), |_| {}));
     assert!(
         text.contains("none of this tells an inhabitant whether it is simulated"),
         "detection must not be presented as evidence of simulation"
     );
+    assert!(text.contains("negative control"));
 }

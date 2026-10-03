@@ -4,187 +4,149 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-Open-source **executable philosophy**: a runnable model of a simulation-hypothesis framework by Parham Modirniya. The codebase *is* the argument — each module implements one theory, and a successful run demonstrates the framework's internal coherence.
+An open-source **computational investigation of a simulation-hypothesis framework** by Parham Modirniya. A toy universe in which each of the framework's theories is a definition or a parameter; experiments with controls and replication; and a strict separation between what the model defines, what follows from its definitions, what had to be run, and what is said about our universe (which the repository never tests).
 
-**Honest framing, which is a deliverable and not a disclaimer:** running this proves the ideas are *coherent*, not that our universe works this way. The model makes falsifiable predictions only about its own behaviour. Any summary the code prints must decline to overstate the result (`report::verdict` ends with this and a test enforces it). Philosophy that can't be coded lives in `docs/philosophy.md`, not in the code.
+**Honest framing is a deliverable, not a disclaimer.** Running this establishes facts about a program. Every printed summary ends by declining to overstate the result, and a test enforces the sentence. When a claim has to change, weaken the claim; never strengthen the rhetoric. A negative or inconvenient result is preserved, not smoothed over: v1.0 withdrew five v0.9 findings and the README lists them.
 
-v0.1 through v0.9 are complete: the six theories, a WebAssembly build and browser viewer (v0.7), the analysis shell (v0.8), and an ensemble-and-ablation pass that tests what the first six showed (v0.9).
+v1.0 is the current state: the six theories (v0.1–v0.6), WebAssembly and the viewer (v0.7), the analysis shell (v0.8), the ensemble pass (v0.9), and the methodological redesign (v1.0: audit, factorial Theory 1 with nulls, detection as hypothesis tests, the pipe in bits, the termination map, the measure problem, bootloader controls, provenance, the claims ledger).
+
+## The four categories
+
+Every claim is one of: **definition** (built in; established by reading the code), **consequence** (follows from the definitions; derived in `docs/derivations.md`), **computational finding** (could have come out otherwise; needs an experiment, controls, replication, an uncertainty), **physical hypothesis** (about our universe; established by nothing here, lives only in `docs/philosophy.md`). The ledger `analysis/claims.toml` records every claim with its category; `analysis/ledger.py` checks the ledger against the README and the artifacts. **Adding or changing a claim means editing the ledger and the README together**, or the check fails. Never describe a consequence as a discovery; never present a definition as a measurement (v0.9's `min_feature: 1.0` was a literal reported as measured).
 
 ## Layout
 
-A workspace. `universe-core` is the crate at the repository root — the six milestones, two dependencies, unchanged by the split. `crates/universe-web` is a thin wasm-bindgen bridge that owns no physics. `web/` is the static viewer. The core stays at the root because tests and the CLI resolve `configs/...` relative to the package root; moving it would change every documented command.
+A workspace. `universe-core` at the repository root holds the model, the experiments and the reports (configs are resolved relative to the package root, which is why it stays there). `crates/universe-web` is a thin wasm-bindgen bridge that owns no physics. `web/` is the static viewer. `analysis/` holds the ledger, its checker, a pandas second opinion and the figures. `docs/` holds the audit, the derivations, the architecture and the philosophy.
 
 ## Commands
 
 ```sh
-cargo run --release -- run  --config configs/default.toml  # Theory 1, 20-seed ensemble; ~11s per seed on M1 Air
-cargo run --release -- run  --config configs/quick.toml    # small world for iterating
-cargo run --release -- nest --config configs/nesting.toml  # Theory 2 chain, <1s
-cargo run --release -- pipe --config configs/pipe.toml     # Theory 3 relay, <1s
-cargo run --release -- detect --config configs/detect.toml # Detection survey, ~10s
-cargo run --release -- sweep  --config configs/sweep.toml  # Theory 6 sweep + sensitivity, 20 seeds; ~6s per seed per part on M1
-cargo run --release -- boot   --config configs/boot.toml   # Theory 5 boot chain + gate ablation, ~5s
-cargo run --release -- boot   --config configs/boot-permissive.toml  # low floors: sterility and the gate
-cargo run --release -- edge   --config configs/edge.toml   # map of why chains end; 10 seeds, ~50s per seed
-cargo test --workspace                                     # native suite
-cargo test physics::                                       # one module
-cargo test blinker_oscillates_with_period_two              # one test by name
-cargo test --test determinism                              # the same-seed-same-universe suite
-cargo test --test nesting                                  # Theory 2 end to end
-cargo test --test pipe                                     # Theory 3 end to end
-cargo test --test detection                                # Detection end to end
-cargo test --test sweep                                    # Theory 6 end to end
-cargo test --test bootloader                               # Theory 5 end to end
-cargo test -- --nocapture                                  # see println! from tests
-cargo clippy --all-targets -- -D warnings                  # kept clean
-cargo fmt
+scripts/reproduce.sh                                          # every published table (~1 h on 4 cores); `quick` for the cheap ones
+cargo run --release -- run     --config configs/default.toml  # Theory 1 factorial, 4 nulls, 7 observables, closure ablation; ~7 min
+cargo run --release -- run     --config configs/quick.toml    # small world for iterating, 20 s
+cargo run --release -- nest    --config configs/nesting.toml  # chain, termination map, size control, churn vs size; ~2 min
+cargo run --release -- pipe    --config configs/pipe.toml     # correlation sweep + information analysis; ~1 min
+cargo run --release -- detect  --config configs/detect.toml   # 40 seeds: 20 calibrate, 20 evaluate; ~30 s
+cargo run --release -- boot    --config configs/boot.toml     # chain, gate ablation, shuffle + area controls; ~5 min
+cargo run --release -- boot    --config configs/boot-permissive.toml
+cargo run --release -- edge    --config configs/edge.toml     # why chains end, 10 seeds x 98 chains; ~5 min
+cargo run --release -- sweep   --config configs/sweep.toml    # the v0.5 grid sweep; ~3 min
+cargo run --release -- measure --config configs/measure.toml  # 5 priors x 3 criteria, 6 universes; ~35 min
+cargo test --workspace                                        # native suite (~230 tests)
+cargo test --test detection                                   # one integration suite
+cargo test physics::                                          # one module
+cargo clippy --workspace --all-targets -- -D warnings         # kept clean
+cargo fmt --all
+wasm-pack test --node crates/universe-web                     # the cross-target fingerprint
+python3 analysis/ledger.py                                    # ledger vs README vs artifacts (stdlib only)
+python3 analysis/ledger.py --stamp                            # after a full reproduce at a clean commit
 ```
 
-CLI overrides: `--seed <N>`, `--ticks <N>`, `--seeds <N>`, `--out <DIR>`.
+CLI overrides: `--seed <N>`, `--ticks <N>`, `--seeds <N>`, `--out <DIR>`, `--budget <N>` (nest/boot/edge), `--steps <N>` (sweep). Overrides are recorded in `metadata.json`.
 
-**Ensembles.** Every documented config sets `world.seeds = 20`, except
-`configs/edge.toml` at 10, because each of its seeds runs 98 chains. The pinned seed
-(42) runs alone first and prints in full; the rest run in parallel via
-`experiment::per_seed` and are summarised as `mean [min, max]`, written to
-`ensemble.csv` (and `ensemble.json` for `run`). Wall time is never reported for
-parallel members. A README number quoted from seed 42 must say so, and a claim
-must state its ensemble share. Seed 42 turned out to be an outlier on four
-findings; do not quote it alone again.
+Always benchmark with `--release`; debug builds are close to 20× slower.
 
-CI (`.github/workflows/ci.yml`) runs fmt, clippy and tests on Linux, tests on
-macOS ARM, and a `claims` job that runs the documented experiment and asserts
-the *reproducible* parts of what the README says about it. If you change the
-README's headline numbers, update that job's thresholds too — it exists to stop
-the README and the code drifting apart. It never asserts on wall time.
+**Ensembles.** Every config runs 20 seeds (`detect.toml` 40, `edge.toml` 10). The pinned seed (42) runs alone first and prints in full; the rest run in parallel via `experiment::per_seed`. Wall time is never reported for parallel members. A seed selects an initial condition and nothing else; say so when quoting an interval. Report `mean ± sd [95% CI]` (`stats::Summary`) and give counts of seeds a Wilson interval (`stats::wilson`) — "20/20" is [0.84, 1.00]. Never quote seed 42 alone as a finding.
 
-Always benchmark with `--release`; debug builds are close to 20× slower (18.7× on `configs/quick.toml`, M1) and the numbers become meaningless.
+**CI** (`.github/workflows/ci.yml`): fmt, clippy, tests on Linux; tests on macOS ARM; the wasm fingerprint; and a `claims` job that runs `scripts/reproduce.sh`, requires a clean-tree `metadata.json` beside every artifact, runs `analysis/ledger.py --ignore-commit`, and checks a short list of by-construction invariants. If a number in the README changes, change the ledger's range in the same commit.
 
 ## Architecture
 
-Module names in `universe-core` match theory names — this is deliberate and load-bearing, since the code is meant to self-document the philosophy. Do not rename a module to something more conventional.
+Module names match theory names on purpose; do not rename a module to something more conventional. `docs/architecture.md` states the MODEL / EXPERIMENTS / RESULTS / INTERPRETATION layering: nothing in the model imports from the experiments; assumptions are parameters and are varied; every finding has a null; consequences are derived, not run; interpretation stays downstream.
 
-| Module | Role |
-| --- | --- |
-| `constraints` | The four toggles + `Params` dials; `Resolved` computes what they work out to |
-| `space` | `Geometry` (fine grid + block partition), `World` (two-fidelity state), macro field |
-| `physics` | Pure update rules; `step` and `tick` |
-| `observer` | `Probe`, and the render/collapse events |
-| `rng` | SplitMix64, hand-written; the creator's input channel |
-| `experiment` | Runs each constraint setting, computes cost ratios and divergences; `per_seed` and `Spread` run and summarise every ensemble |
-| `budget` | Degradation rule; closed-form depth bound |
-| `layer` | Nesting: sizes each layer to its budget, runs the chain |
-| `pipe` | Horizon, serialization, `WriteEnd`/`ReadEnd`, logging threshold; channel width (`Horizon::bits`) and the width sweep |
-| `detector` | Inhabitant measurements; which limits are findable from inside; `isotropy` reads the lattice's shape |
-| `sweep` | Fine-tuning: scores each rule setting, counts distinct laws; `run_sensitivity` scores all four constants under three criteria |
-| `bootloader` | Cluster tracking, bootloader detection, the boot chain; `Gate` ablation and the `edge` map of why chains end |
-| `golden` | The pinned reference universe and its fingerprint |
-| `report` | CSV, JSON, printed summary and verdict |
-| `config` | TOML loading and validation |
+| Module | Role | Layer |
+| --- | --- | --- |
+| `constraints` | The four toggles, `Params`, `CoarseRule` (binomial / indicator / frozen), `Resolved` | model |
+| `space` | `Geometry`, `World` (cells + block densities, `sample` as the seam), macro field | model |
+| `physics` | Pure `step` and `tick`; density-band `Rules` with an optional radius-1 table; the three closures | model |
+| `observer` | `Probe`; render and collapse | model |
+| `rng` | SplitMix64, positional `derive` | model |
+| `budget`, `layer` | Degradation rule; chain, exact `predict_work`, termination map, size control, churn vs size | model / experiments |
+| `pipe` | `Message`, `WriteEnd`/`ReadEnd`, horizon, relay, correlation sweep | model |
+| `bootloader` | Cluster tracking as a pure function of frames, the boot chain, `Gate`, shuffle and area controls, the `edge` map | model / experiments |
+| `experiment` | `run` (records a `Profile`), `per_seed`, `Spread` | experiments |
+| `limits` | Theory 1: the 2⁴ factorial, four nulls, `D`, main effects, interactions, Pareto set | experiments |
+| `observables` | Seven macro-scale observables | experiments |
+| `detector` | Hypothesis tests: statistics, calibration/evaluation split, negative and resample controls, `Standing` | experiments |
+| `information` | Mutual information per task per encoding; window, noise and bit-flip controls | experiments |
+| `sweep`, `measure` | The grid sweep; five priors, three criteria, six universes | experiments |
+| `stats` | `Summary`, Wilson, Cohen's d, z and tail against a null, deterministic bootstrap | experiments |
+| `golden`, `provenance` | The cross-target fingerprint; `metadata.json` | experiments |
+| `report` (+ `report::{limits,detect,information,nesting,measure,boot}`) | CSV, JSON, summaries ending with the framing sentence | results |
 
-**The loop** (`experiment::run`) is the whole model in three lines: `observe` forces detail into existence where something is looking → `tick` applies the laws → record what an outside observer could have seen.
+### Things worth understanding before editing
 
-### Four things worth understanding before editing
+**Two-fidelity storage and the closure.** `World::sample` returns the cell inside a resolved block and the block's density inside an unresolved one. What advances an unresolved block is `CoarseRule`, an *assumption*. The binomial closure is the expected next density under independent cells (it holds Life near its mean-field fixed point 0.37 while Life decays — a known failure of mean fields, measured here, not a bug). The indicator closure is kept only to reproduce v0.9. Any result about lazy rendering must be reported under all three.
 
-**Two-fidelity storage.** `World` holds `cells` (one byte each) *and* `coarse` (one density per block), with `resolved[b]` deciding which is authoritative. `World::sample` is the seam: inside a resolved block it reads the cell, inside an unresolved one it returns the block's density. That single function is where lazy rendering's cost saving *and* its error both come from. Physics reads neighbours only through it.
+**Same-seed comparisons need a same-seed null.** A limit toggled at the same seed starts correlated with the reference; a reseed does not. Report divergence over the second half and at the final tick, never only the whole-run mean, and read it against `perturb` as well as `seed`. Mean |Δ| rewards a universe with less macro variance (Jensen), which is why fidelity is a vector of observables and `D`, not one number.
 
-**Mutual blindness is a type-system invariant, not a convention.** `pipe::WriteEnd` has `write` and `seal` and nothing else — no method returns anything about the far side. `ReadEnd` cannot write, and nothing converts it back. Do not add a read method, a receipt, an acknowledgement, or a `&mut` accessor that hands out both halves: the whole point is that a child cannot discover it is being read. If a future milestone needs bidirectional flow, that is a new type, not a loosened one.
+**The speed cap changes the law.** Radius 3 with the shipped bands is a larger-than-life rule at occupancy ~0.23; radius 1 is Conway at ~0.06. Say so whenever the speed cap is compared to the reference.
 
-**Cost is quantized, and not monotonic in world size.** Lazy rendering charges by the block, and `layer::scale_probe` rescales the probe with the world — so a probe landing on block boundaries resolves far fewer blocks than one of the same area straddling them. A 48×48 layer costs more than a 64×64 one. This is why `layer::fit_spec` scans the whole range instead of walking down from an area estimate, and why `layer::predict_work` builds the real `Geometry` rather than estimating from coverage. `predict_work` is *exact*, and a test asserts equality with what the run spends; if that ever weakens to an inequality, the budget check has quietly become a guess.
+**Cost is quantised and `predict_work` is exact.** Lazy rendering charges by the block; `scale_probe` rescales the probe with the world; `fit_spec` scans because cost is not monotone in size. A test asserts equality between `predict_work` and what a run spends; if that weakens to an inequality the budget check has become a guess. A layer of the chain *is* `experiment::run` on a smaller config — nothing about nesting reaches it, and the size control pins that.
 
-**The chaos floor.** The world is chaotic, so any perturbation decorrelates the macro field and a raw divergence number means nothing. `experiment::run_all` therefore runs the unconstrained reference a *second* time with only the seed changed; that divergence is the floor chaos alone produces. Every verdict compares against the floor rather than against zero. If you change how divergence is measured, keep the control — without it the report is uninterpretable and every limit looks damning.
+**Detection standing is declared before data.** `detector::standing` says, per (limit, statistic, gaze), whether a result is a consequence, a finding or exploratory. A new statistic gets its standing there first. Calibration and evaluation seeds are disjoint; the negative control (two all-limits universes) must stay quiet; the resample control says whether a lazy detector detects laziness or approximation.
+
+**Inhabitants and probes are in base cells.** The inhabitant window scales with the subdivision like the probe does; v0.9's did not, and it produced a false detection of discrete space (audit §2.5).
 
 ## Non-negotiables
 
-**Physics is pure.** `physics::step` takes state and returns state. No mutation of inputs, no interior mutability, no logging, no clock, no I/O. `step_does_not_mutate_its_input` checks this rather than trusting a comment. This is what lets one law run at four resolutions and two fidelities and still be the same law.
+**Physics is pure.** `physics::step` takes state and returns state; no mutation, no interior mutability, no logging, no clock, no I/O. `step_does_not_mutate_its_input` checks it.
 
-**Determinism: same seed → same universe.** All randomness goes through `rng::Rng`. Never introduce `rand`, thread-local RNGs, `SystemTime`, or anything that depends on hash-map iteration order. Rendering uses `Rng::derive` for *positional* sub-streams keyed by block and tick — never draws from a shared stream, because that would make the result depend on visit order.
+**Determinism: same seed → same universe, on every target.** All randomness through `rng::Rng`; positional `derive` for anything keyed by place and time; never `rand`, thread-local RNGs, `SystemTime`, or hash-map order. No transcendental functions in anything that feeds the fingerprint (`band_probability` is multiplications for this reason). If a deliberate physics change moves `GOLDEN_FINGERPRINT`, compute it natively, confirm it with `wasm-pack test`, update the constant, record the old value in `golden.rs`, and say so in the commit.
 
-**Benchmarks are claims.** Every performance number in the README must be reproducible by a command in the repo. Distinguish reproducible counters (`Work`, divergences, cell counts) from machine-dependent measurements (wall time). Memory is reported twice on purpose — `peak_live_bytes` is what a resource-honest implementation would hold, `allocated_bytes` is what this one really allocates; reporting only one would be dishonest in one direction or the other.
+**Every number is a claim with a provenance.** A result lives in an artifact with a `metadata.json`, in the ledger with a range, and in the README with its id. Distinguish counters (reproducible anywhere) from wall time (never asserted). Memory is reported twice on purpose (`peak_live_bytes` vs `allocated_bytes`).
 
-**Module docs state their theory and what would falsify it within the model.** Keep this up when adding modules.
+**Every finding has a null and a replication.** No statistic computed over a filtered subset without a sample-size guard (`MIN_CORRELATION_SAMPLES`); no detection without a false-positive rate; no "is this different" test without an absolute floor and a control that should fail.
 
-**Resolution-independent rules.** `physics::Rules` is stated as density bands, not neighbour counts, so the same law survives a change of resolution. At radius 1 the defaults reduce exactly to Conway B3/S23 (tested with blinker, block, glider). Any new rule must keep that property or the cross-resolution comparison is meaningless.
+**Mutual blindness is a type.** `WriteEnd` has `write` and `seal` and nothing else; nothing converts a `ReadEnd` back. Do not add a read method, a receipt, or a `&mut` accessor. `Message` fields are private and only the encoded payload is stored.
 
-**Fair comparisons.** `World::seed` draws the pattern at base resolution and upsamples, so a coarse and a subdivided universe start from the same macro configuration. Without this the resolution comparison would compare two different initial conditions.
+**Module docs state their theory and what would falsify it within the model.**
 
-## Findings so far
+**Resolution-independent rules.** `Rules` is density bands; at radius 1 the defaults are B3/S23 (tested). The optional rule table is radius-1 only and never read from a config.
 
-Recorded because they are results of the model, not assumptions fed into it:
+**Fair comparisons.** `World::seed` draws at base resolution and upsamples. Probes and inhabitants are placed in base cells.
 
-- All limits together: ~190× less work, ~14× less memory.
-- **Discrete time is the only free lunch** — halves the cost and diverges *below* the chaos floor (0.94× at seed 42; below its own floor in 20/20 seeds, 0.91 [0.83, 0.97]).
-- Space, speed cap and lazy rendering are all cheap but visible above the floor. Cheapness and invisibility are separate properties.
-- **Discrete time and the speed cap are coupled**: influence covers `radius × substeps` cells per tick over cells of size `1/subdivision`, so refining time without refining space raises the physical speed of influence. See `constraints::Resolved`. This follows from the definitions; it was noticed, not discovered.
+**Dependencies stay minimal.** `serde` + `toml` in the core; `wasm-bindgen` in the bridge; the analysis layer may use pandas, scipy and matplotlib but `ledger.py` uses the standard library only so CI needs no venv.
 
-**Earned versus by construction.** The README's "What had to be run" table classifies every finding. When a milestone adds or changes a finding, update that table and its row counts in the same commit. Do not describe a result that follows from a module's definitions as a discovery.
+**Nothing models a black hole.** The channel is a horizon and a pipe; the analogy is a physical hypothesis in `docs/philosophy.md`.
 
-From v0.2:
+## Findings so far (v1.0)
 
-- A chain's total cost is bounded by `root / (1 - fraction)` — 1.33× the root layer at the default fraction. Nesting is bounded in total spend, not just depth.
-- (v0.9 ensemble) The deepest layer is calmer than the root in 20/20 seeds; the step-by-step decline holds in only 11/20. The "~10× per layer" below was seed 42 alone.
-- The shipped chain **dies of the spatial floor, not the budget floor**: the closed form allowed 4 layers, the chain built 3.
-- Churn falls ~10× per layer *at seed 42 only* (see the ensemble line above). The measure is biased *against* finding a decline (a fixed 16×16 macro grid makes small worlds look noisier), so the root-to-deepest decline is if anything understated.
-- `Degradation::max_depth` is an **upper bound**, not an equality: integer flooring at each generation costs real chains depth.
-- A child with budget slack legitimately keeps its host's size — shrinkage is derived from scarcity, never imposed. Pinned by `a_child_with_slack_may_keep_its_hosts_size`.
+Recorded because they are results of the model; each has a ledger id.
 
-From v0.6:
+- Every limit but discrete time moves the seven macro observables far beyond a reseed (`D` 9 / 62 / 21 / 116 vs 1.5); discrete time is within the reseed null (`D` 1.38 vs 1.46, divergence 0.93× a reseed's, above it in 2/20). Not "free": not distinguishable at n = 20. (T1-FND-001/002)
+- The speed cap is a change of law (occupancy 0.23 → 0.06). Lazy rendering's visibility is the closure's: frozen matches a reseed's divergence while `D` = 11. Speed × lazy interact (10.9 ± 2.2). (T1-FND-004/005/006)
+- Chains end on budget, space or block quantisation; a layer is a standalone universe of its size; churn follows the resolved share of blocks, and "the deepest layer is calmer" holds in 0/20 under the binomial closure. (T2-CON-002/003, T2-FND-001 withdrawn)
+- At full width the horizon carries 1.4 bits about itself, 0.5 about the child, 0.3 ten ticks ahead; two uniform bits carry 0.00 at the shipped placement; an adaptive four bits carry 1.9. (T3-FND-001/002)
+- Lazy rendering is findable by a rendering inhabitant via `edge_excess` (power 19/20, FPR 1/20, exploratory) — and so is the resample control (20/20): the boundary approximation is what is detected. Negative control ceiling 0.10. (DET-FND-001/002)
+- Bootloader tracker false-positive floor 5%; density rises down the chain (7.3 → 10.8 → 13.0 per 1000 cells) and matches standalone same-size worlds. Gate never fires under shipped floors; 16/20 under permissive, sole stop 7/20. (T5-FND-001/002/003)
+- In the baseline universe productive laws are a minority under every prior and criterion, from 0.055 to 0.446: a factor of eight that is the prior's and the criterion's. At edge 96 or 40 ticks the growth criterion admits a majority (0.60, 0.63). (T6-FND-001/002/003)
+- Rust folds float sums from `-0.0`; normalise with `+ 0.0` before reporting.
 
-- The boot chain closes the loop: each layer is seeded from what crossed its parent's horizon, using all six theories at once.
-- (ablation) Bootloaders never enter a child's seed; they act only through `bootloader::Gate`. Under the shipped floors the gate never fires (20/20 identical chains). Under `configs/boot-permissive.toml` it is the sole stop in 8/20 seeds and never changes a shared layer. Do not describe bootloaders as driving or shaping the next layer.
-- **A chain can die of sterility rather than poverty** — Theory 5 supplies a depth limit independent of the budget. Which limit binds depends on the floors in `[nesting]`. The `edge` map shows it is rare: sterility alone binds only at fraction ≥ 0.4 with edge ≤ 8, in at most 4/10 seeds per cell, and is never the commonest ending. A chain's `ended_because` label credits sterility even when another limit ties; use `bootloader::Ending::of`, which checks the ungated chain.
-- Poorer layers produce less life: bootloaders fall 128 → 32 → 6 down the chain.
-- Rust folds float sums from `-0.0` (the true additive identity), so an empty `sum::<f64>()` prints as `-0.0`. Normalise with `+ 0.0` before reporting.
-
-From v0.5:
-
-- Fine-tuning is a range, not a number: 9% (Conway bar) to 28–33% (compressibility, perturbation growth) across all four constants and 20 seeds. Minority under every criterion. Quote the range.
-- 8.9% [2.4%, 19%] of reachable laws are productive across 20 seeds under the original two-constant Conway sweep. Seed 42 gave the 19% that was first reported, the maximum. Productivity depends on the initial condition as well as the law.
-- **Complexity criteria must be bands, not floors.** An activity floor admitted chaotic rules churning at 20× Conway. Class 3 is not class 4.
-- **Count distinct laws, not grid area.** 441 settings denote 42 laws because only `k/8` densities occur. An area fraction reports the sweep's resolution, not the universe's. `sweep::rule_signature` canonicalises.
-- Raw macro variance nearly tracks density; normalise by the i.i.d. baseline `p(1-p)/cells_per_macro` before calling anything "structure".
-
-From v0.4:
-
-- Pixelation's *scale* is undetectable from inside: the cell is the ruler. Its *shape* is detectable: `Evidence::anisotropy` reads √2 (diagonal versus axis reach) in 20/20 seeds, against 1 for a continuum. A finer lattice reads √2 too, so scale stays hidden. Wider reach (radius 3, 2 substeps) undersamples corner-only births and reads noise; do not build a finding on it.
-- `influence_speed` measures `radius × substeps` and cannot factor it — the v0.1 coupling reappears as a limit on knowledge.
-- Lazy rendering is concealed by the act of measuring it. `Gaze::Rendering` vs `Gaze::Passive` shows this is a consequence of the framework's definition of a probe, not an artefact of where the inhabitant stands.
-- **Detections need an absolute floor, not just a relative one.** 0.0002 vs 0.0001 is a 50% relative gap and pure noise; it was reported as a finding until `MIN_ABSOLUTE` existed. Any new "is this different" test needs both.
-- Whether a speed bound is *reached* is region-dependent and not a stable invariant. Assert the ceiling, report saturation as an observation.
-
-From v0.3:
-
-- Theory 3's split is **designed in**: `Message` carries a magnitude and a hashed digest, so "magnitude survives, arrangement does not" is a definition, and the 50.2% avalanche only checks the hash. The measured result is the width curve: 0.82 [0.73, 0.90] correlation at full width across 20 seeds, and 2–6 bits a tick keep 90% of it. The curve dips at 3 bits in every seed, an artefact of uniform quantisation levels; do not claim it is monotone.
-- `Message` fields are private and only the encoded payload is stored. Do not add a field holding the unquantised magnitude: the parent must only ever see what the channel's width allows.
-- **Threshold sweeps manufacture perfect correlations.** The first version of the report showed 1.0000 at a high threshold — from two data points, where Pearson is always ±1. `MIN_CORRELATION_SAMPLES` refuses to print a correlation below five events, and the sweep shows the event count beside every row. Any future statistic computed over a filtered subset needs the same guard.
+**Withdrawn from v0.9** (kept in the ledger as `withdrawn`): the free lunch below the chaos floor; the calmer deepest layer; poorer layers producing less life; looking concealing lazy rendering; 2–6 bits keeping 90%; √2 as a measured finding; 19% productive. See `docs/audit.md` for why.
 
 ## Decisions already made — do not relitigate
 
-- **Language: Rust.** Strict compiler substitutes for human language expertise in an AI-built, AI-consumed codebase; supports the paradigm split; single fast binary; WASM later.
-- **Paradigm split:** physics = pure functions over immutable state; entities/layers = traits + structs, composition over inheritance.
-- **Dependencies stay minimal.** Currently `serde` + `toml`, both only for reading the config. The RNG is hand-written rather than pulled in, because `StdRng` is not guaranteed reproducible across `rand` versions and determinism is the project's first rule. Resist adding more.
-- **Target hardware:** MacBook Air M1, fanless — long runs throttle. 2D toy scale only. Three interesting nested layers beat ten dead ones.
-- **v0.1 world:** grid CA. **v0.1 probe:** fixed window. **Repo:** Parham's personal GitHub.
+- **Language: Rust.** Strict compiler, paradigm split (pure physics; layers as structs), one fast binary, WASM.
+- **Default closure: binomial.** It is what "mean field" means; the indicator closure stays for reproduction only; results are reported under all three.
+- **Dependencies stay minimal.** The RNG is hand-written because `StdRng` is not guaranteed stable across `rand` versions.
+- **Target hardware:** MacBook Air M1, 2D toy scale. Three interesting layers beat ten dead ones.
 - **Distribution:** public repo, dual `MIT OR Apache-2.0`.
+- **Ledger ids are stable.** A withdrawn claim keeps its id and its status; it is not deleted.
 
 ## Roadmap
 
-**Determinism is now a cross-target invariant.** `universe_core::golden` pins one reference universe and reduces it to a `u64`. The native suite and the WebAssembly suite each assert `GOLDEN_FINGERPRINT`; neither sees the other's answer. If a change to physics moves that number legitimately, update the constant *and say so in the commit* — a silent update makes the check meaningless. If it moves without a deliberate change, that is a finding about the first rule, not a flaky test.
+The original roadmap (v0.1–v0.6) and phase 2 (v0.7–v0.9) are complete; v1.0 is the methodological redesign. Open items are in the README's "What remains unresolved": discrete time at higher seed counts, a closure that tracks Life's decay, a preregistered replication of `edge_excess`, a like-for-like window control for the pipe. The research track — a child whose dynamics depend on what its parent's bootloaders did — stays deliberately unscheduled. Finish a milestone before starting the next.
 
-**The viewer contains no physics.** `web/app.js` draws and wires controls; every rule comes from the core through wasm. Do not reimplement a fast approximation in JS — the page would then be showing a different universe from the one the findings describe.
+## Vocabulary — use consistently
 
-**The original roadmap is complete**: v0.1 (limits as optimizations), v0.2 (nesting and degradation), v0.3 (the pipe), v0.4 (detection), v0.5 (fine-tuning sweep), v0.6 (bootloader life).
-
-Done in phase 2: v0.7 (workspace split, WebAssembly, the viewer, Pages deploy), v0.8 (the Python analysis shell), and v0.9 (seed ensembles, the gate and channel-width ablations, the fine-tuning sensitivity analysis, lattice-shape detection, the `edge` map, and the README's "What had to be run" table). v0.9 added no theory; it tested the claims of the first six.
-
-The research track — seeded replicators, evolution — stays deliberately unscheduled. It is also where Theory 5 would have to go to mean more than it does now: bootloaders decide whether a child universe exists, never what it is.
-
-This order is firm. Finish a milestone before starting the next, and do not widen the current one to include the next even where they touch.
-
-## Vocabulary — use consistently in code and docs
-
-- **Layer** — one universe in the chain. **Layer 0** is the host machine's process.
-- **Horizon / pipe** — the one-way serializing channel between layers.
-- **Logging threshold** — minimum aggregate scale at which a parent's observer notices child activity. Implemented as `report.macro_grid`.
-- **Degradation rule** — each child's resource budget is a strict fraction of its parent's.
-- **Bootloader** — an emergent agent/pattern whose effect is to instantiate computation one layer down.
+- **Layer** — one universe in the chain. **Layer 0** is the host process.
+- **Horizon / pipe** — the one-way serializing channel between layers. Never "black hole" in code or configs.
+- **Closure** — what stands in for an unobserved block: binomial, indicator or frozen.
+- **Null** — a reference universe altered in a way that is not a limit: reseed, perturb, density, shuffle.
+- **D** — root mean square of the seven observables' z-scores against seed-to-seed spread.
+- **Standing** — consequence / finding / exploratory, declared per detection statistic before data.
+- **Logging threshold** — minimum aggregate scale at which a parent notices; `report.macro_grid`.
+- **Degradation rule** — each child's budget is a strict fraction of its parent's.
+- **Bootloader** — a cluster that persists and travels; a precondition, not an achievement.
 - **Probe / observation** — the event that forces full-resolution computation of a region.
