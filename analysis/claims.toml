@@ -102,7 +102,7 @@ metric = "distance D and second-half macro divergence, per setting, against the 
 seeds = 20
 controls = "reseed, one-cell perturbation, 1% density nudge, shuffled surrogate, 190 pairwise reference pairs"
 status = "verified"
-last_verified_commit = "PENDING"
+last_verified_commit = "972145de8c39b2f6d38c726e8908e357bb097f44"
 design_version = 2
   [[claim.check]]
   file = "ensemble.json"
@@ -146,7 +146,7 @@ metric = "distance D, ratio of second-half divergence to the reseed null, seeds 
 seeds = 20
 controls = "reseed, one-cell perturbation, density nudge, shuffled surrogate"
 status = "verified"
-last_verified_commit = "PENDING"
+last_verified_commit = "972145de8c39b2f6d38c726e8908e357bb097f44"
 design_version = 2
   [[claim.check]]
   file = "ensemble.json"
@@ -174,7 +174,7 @@ metric = "whole-run against second-half mean divergence of the time setting"
 seeds = 20
 controls = "reseed null measured on the same windows"
 status = "withdrawn"
-last_verified_commit = "PENDING"
+last_verified_commit = "972145de8c39b2f6d38c726e8908e357bb097f44"
 design_version = 2
   [[claim.check]]
   file = "ensemble.json"
@@ -192,7 +192,7 @@ metric = "mean z per observable, speed setting"
 seeds = 20
 controls = "reseed null per observable"
 status = "verified"
-last_verified_commit = "PENDING"
+last_verified_commit = "972145de8c39b2f6d38c726e8908e357bb097f44"
 design_version = 2
   [[claim.check]]
   file = "ensemble.json"
@@ -214,7 +214,7 @@ metric = "distance D and divergence ratio of lazy under three closures"
 seeds = 20
 controls = "reseed null; the three closures as an ablation"
 status = "verified"
-last_verified_commit = "PENDING"
+last_verified_commit = "972145de8c39b2f6d38c726e8908e357bb097f44"
 design_version = 2
   [[claim.check]]
   file = "ensemble.json"
@@ -241,7 +241,7 @@ metric = "two-factor interaction on D from the 2^4 factorial"
 seeds = 20
 controls = "the full factorial; main effects on log work as the additive reference"
 status = "verified"
-last_verified_commit = "PENDING"
+last_verified_commit = "972145de8c39b2f6d38c726e8908e357bb097f44"
 design_version = 2
   [[claim.check]]
   file = "ensemble.json"
@@ -259,7 +259,7 @@ metric = "Pareto set over (mean work ratio, mean D)"
 seeds = 20
 controls = "reseed null defines the floor of D"
 status = "verified"
-last_verified_commit = "PENDING"
+last_verified_commit = "972145de8c39b2f6d38c726e8908e357bb097f44"
 design_version = 2
   [[claim.check]]
   file = "ensemble.json"
@@ -334,7 +334,7 @@ metric = "mean tick-to-tick macro churn per layer; churn against size for standa
 seeds = 20
 controls = "standalone universes at every edge the chain could choose, with the resolved share recorded"
 status = "withdrawn"
-last_verified_commit = "PENDING"
+last_verified_commit = "972145de8c39b2f6d38c726e8908e357bb097f44"
 design_version = 2
   [[claim.check]]
   file = "nesting/ensemble.csv"
@@ -391,7 +391,7 @@ metric = "plug-in mutual information minus its shuffle null, bits per tick, per 
 seeds = 20
 controls = "20 time permutations per measure; random symbols; a window half a world away; bit flips"
 status = "verified"
-last_verified_commit = "PENDING"
+last_verified_commit = "972145de8c39b2f6d38c726e8908e357bb097f44"
 design_version = 2
   [[claim.check]]
   file = "pipe/information_ensemble.csv"
@@ -426,7 +426,7 @@ metric = "corrected mutual information about horizon_now, per encoding and width
 seeds = 20
 controls = "shuffle null; five encodings at matched widths"
 status = "verified"
-last_verified_commit = "PENDING"
+last_verified_commit = "972145de8c39b2f6d38c726e8908e357bb097f44"
 design_version = 2
   [[claim.check]]
   file = "pipe/information_ensemble.csv"
@@ -452,7 +452,7 @@ metric = "corrected mutual information about global_now from the far window"
 seeds = 20
 controls = "the horizon itself; random symbols"
 status = "exploratory"
-last_verified_commit = "PENDING"
+last_verified_commit = "972145de8c39b2f6d38c726e8908e357bb097f44"
 design_version = 2
   [[claim.check]]
   file = "pipe/information_ensemble.csv"
@@ -560,7 +560,7 @@ metric = "power and FPR of edge_excess on 20 held-out seeds, rule calibrated on 
 seeds = 40
 controls = "two all-limits universes at neighbouring seeds; the resample control"
 status = "exploratory"
-last_verified_commit = "PENDING"
+last_verified_commit = "972145de8c39b2f6d38c726e8908e357bb097f44"
 design_version = 2
   [[claim.check]]
   file = "detect/detection.json"
@@ -586,7 +586,7 @@ metric = "highest power over statistics and gazes on the negative control"
 seeds = 40
 controls = "this is the control"
 status = "verified"
-last_verified_commit = "PENDING"
+last_verified_commit = "972145de8c39b2f6d38c726e8908e357bb097f44"
 design_version = 2
   [[claim.check]]
   file = "detect/detection.json"
@@ -604,7 +604,7 @@ metric = "power of edge_excess for discrete_space on held-out seeds"
 seeds = 40
 controls = "negative control; the other three statistics"
 status = "exploratory"
-last_verified_commit = "PENDING"
+last_verified_commit = "972145de8c39b2f6d38c726e8908e357bb097f44"
 design_version = 2
   [[claim.check]]
   file = "detect/detection.json"
@@ -623,7 +623,7 @@ metric = "power of smoothness for speed_cap on held-out seeds"
 seeds = 40
 controls = "negative control"
 status = "verified"
-last_verified_commit = "PENDING"
+last_verified_commit = "972145de8c39b2f6d38c726e8908e357bb097f44"
 design_version = 2
   [[claim.check]]
   file = "detect/detection.json"
@@ -672,7 +672,7 @@ metric = "bootloaders per thousand cells in real and time-shuffled frames"
 seeds = 20
 controls = "this is the control"
 status = "verified"
-last_verified_commit = "PENDING"
+last_verified_commit = "972145de8c39b2f6d38c726e8908e357bb097f44"
 design_version = 2
   [[claim.check]]
   file = "boot/shuffle_control.csv"
@@ -696,7 +696,7 @@ metric = "bootloaders per thousand cells by depth, and in standalone universes o
 seeds = 20
 controls = "standalone universes at the root's seed and at the layer's own seed"
 status = "withdrawn"
-last_verified_commit = "PENDING"
+last_verified_commit = "972145de8c39b2f6d38c726e8908e357bb097f44"
 design_version = 2
   [[claim.check]]
   file = "boot/area_control.csv"
@@ -727,7 +727,7 @@ metric = "gate fired, sole stop, and the ending per cell of the fraction x floor
 seeds = 20
 controls = "the gate ablation (Gate::Open) at every setting"
 status = "verified"
-last_verified_commit = "PENDING"
+last_verified_commit = "972145de8c39b2f6d38c726e8908e357bb097f44"
 design_version = 2
   [[claim.check]]
   file = "boot/gate.csv"
@@ -784,7 +784,7 @@ metric = "share of laws admitted, five priors x three criteria"
 seeds = 20
 controls = "five priors as the control on the measure; the same life-like sample at every seed"
 status = "verified"
-last_verified_commit = "PENDING"
+last_verified_commit = "972145de8c39b2f6d38c726e8908e357bb097f44"
 design_version = 1
   [[claim.check]]
   file = "measure/measure.json"
@@ -807,7 +807,7 @@ metric = "range of the share over priors and criteria"
 seeds = 20
 controls = "five priors, three criteria"
 status = "verified"
-last_verified_commit = "PENDING"
+last_verified_commit = "972145de8c39b2f6d38c726e8908e357bb097f44"
 design_version = 1
   [[claim.check]]
   file = "measure/measure.json"
@@ -829,7 +829,7 @@ metric = "share of the 2116 band laws admitted, per setting and criterion"
 seeds = 3
 controls = "the baseline setting; the three criteria; whether Conway passes"
 status = "verified"
-last_verified_commit = "PENDING"
+last_verified_commit = "972145de8c39b2f6d38c726e8908e357bb097f44"
 design_version = 1
   [[claim.check]]
   file = "measure/measure_sensitivity.csv"
