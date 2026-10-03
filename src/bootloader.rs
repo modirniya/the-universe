@@ -22,6 +22,14 @@
 //! bootloader. Conway's glider is the canonical case, and
 //! `a_glider_is_a_bootloader` checks that the detector finds one.
 //!
+//! The detector can also be fooled: debris lying within [`MATCH_RADIUS`] of
+//! other debris on consecutive ticks chains into a track that "travels"
+//! although nothing did. [`shuffle_control`] measures how often, by running
+//! the same frames in a shuffled order, where no real trajectory survives.
+//! Every bootloader count is reported beside that false-positive rate and as
+//! a density per thousand cells, because a count falls with the world's area
+//! whatever the world does ([`area_control`]).
+//!
 //! Falsified within the model if: bootloaders appear everywhere in the rule
 //! space, which would make them unremarkable and disconnect Theory 5 from
 //! Theory 6; or if no rule produces them, which would mean the model cannot
@@ -109,12 +117,24 @@ pub struct BootSurvey {
     pub transport: f64,
     /// Longest-lived bootloader, in ticks.
     pub longest_lifetime: u64,
+    /// Cells in the universe surveyed, so counts can be read as densities.
+    pub cells: usize,
 }
 
 impl BootSurvey {
     /// Whether this universe can boot anything at all.
     pub fn can_boot(&self) -> bool {
         self.bootloaders > 0
+    }
+
+    /// Bootloaders per thousand cells. A count falls with the world; a density
+    /// says whether anything beyond the world's size changed.
+    pub fn per_kilocell(&self) -> f64 {
+        if self.cells == 0 {
+            f64::NAN
+        } else {
+            self.bootloaders as f64 * 1000.0 / self.cells as f64
+        }
     }
 }
 
@@ -207,6 +227,16 @@ fn toroidal_distance(a: &Cluster, b: &Cluster, w: f64, h: f64) -> f64 {
 
 /// Follow clusters through a run and report what travelled.
 pub fn survey(cfg: &Config, rules: &Rules, constraints: Constraints) -> BootSurvey {
+    let (frames, geom) = frames(cfg, rules, constraints);
+    track(&frames, geom.w as f64, geom.h as f64, geom.cells())
+}
+
+/// The clusters of every tick of a run, in order, and the world's geometry.
+pub fn frames(
+    cfg: &Config,
+    rules: &Rules,
+    constraints: Constraints,
+) -> (Vec<Vec<Cluster>>, Geometry) {
     let res = Resolved::new(&constraints, &cfg.params);
     let geom = Geometry::new(
         cfg.world.width,
@@ -214,17 +244,27 @@ pub fn survey(cfg: &Config, rules: &Rules, constraints: Constraints) -> BootSurv
         res.subdivision,
         res.block_size,
     );
-    let (fw, fh) = (geom.w as f64, geom.h as f64);
     let mut world = World::seed(geom, cfg.world.seed, cfg.world.init_density);
-
-    let mut open: Vec<Track> = Vec::new();
-    let mut done: Vec<Track> = Vec::new();
-
+    let mut out = Vec::with_capacity(cfg.world.ticks as usize);
     for t in 0..cfg.world.ticks {
         let (observed, _) = observe(&world, &cfg.observer, t, cfg.world.seed, res.lazy);
         let (advanced, _) = tick(&observed, rules, &res);
+        out.push(clusters(&advanced));
+        world = advanced;
+    }
+    (out, geom)
+}
 
-        let found = clusters(&advanced);
+/// Match clusters tick to tick and count what travelled.
+///
+/// Pure in the frames: the same frames in the same order give the same
+/// survey, which is what lets the shuffled control below be a control.
+pub fn track(frames: &[Vec<Cluster>], fw: f64, fh: f64, cells: usize) -> BootSurvey {
+    let mut open: Vec<Track> = Vec::new();
+    let mut done: Vec<Track> = Vec::new();
+
+    for (t, found) in frames.iter().enumerate() {
+        let t = t as u64;
         let mut claimed = vec![false; found.len()];
         let mut still_open: Vec<Track> = Vec::new();
 
@@ -269,7 +309,6 @@ pub fn survey(cfg: &Config, rules: &Rules, constraints: Constraints) -> BootSurv
         }
 
         open = still_open;
-        world = advanced;
     }
 
     done.extend(open);
@@ -283,7 +322,51 @@ pub fn survey(cfg: &Config, rules: &Rules, constraints: Constraints) -> BootSurv
         // transported nothing reports "-0.0" without this.
         transport: boots.iter().map(|t| t.displacement).sum::<f64>() + 0.0,
         longest_lifetime: boots.iter().map(|t| t.lifetime()).max().unwrap_or(0),
+        cells,
     }
+}
+
+/// The tracker's false-positive rate: the same frames in a shuffled order.
+///
+/// A permutation of time destroys every real trajectory while keeping every
+/// frame's clusters exactly as they were, so nothing in the shuffled sequence
+/// *travels*; any track the detector still calls a bootloader is debris that
+/// happened to lie within [`MATCH_RADIUS`] of other debris across consecutive
+/// frames. The real survey is reported beside it so the count can be read
+/// against what the detector produces from nothing.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ShuffleControl {
+    pub real: BootSurvey,
+    pub shuffled: BootSurvey,
+}
+
+impl ShuffleControl {
+    /// Bootloaders the detector finds per thousand cells in the shuffled
+    /// frames: what a count of this size could be made of.
+    pub fn false_positive_density(&self) -> f64 {
+        self.shuffled.per_kilocell()
+    }
+
+    /// Real density less the false-positive density.
+    pub fn excess_density(&self) -> f64 {
+        self.real.per_kilocell() - self.shuffled.per_kilocell()
+    }
+}
+
+const SHUFFLE_TAG: u64 = 0x5348_5546_4C45_4652;
+
+/// Survey a universe, then survey its frames in a shuffled order.
+pub fn shuffle_control(cfg: &Config, rules: &Rules, constraints: Constraints) -> ShuffleControl {
+    let (mut fr, geom) = frames(cfg, rules, constraints);
+    let (fw, fh, cells) = (geom.w as f64, geom.h as f64, geom.cells());
+    let real = track(&fr, fw, fh, cells);
+    let mut rng = Rng::derive(cfg.world.seed, SHUFFLE_TAG, fr.len() as u64, 0);
+    for i in (1..fr.len()).rev() {
+        let j = (rng.next_u64() % (i as u64 + 1)) as usize;
+        fr.swap(i, j);
+    }
+    let shuffled = track(&fr, fw, fh, cells);
+    ShuffleControl { real, shuffled }
 }
 
 /// Derive a child universe's seed from what crossed the horizon.
@@ -500,6 +583,60 @@ pub fn run_boot_chain_with(
         layers,
         ended_because,
     }
+}
+
+/// A layer of a boot chain beside standalone universes of its size.
+///
+/// A layer differs from the root in two ways: it is smaller, and it is seeded
+/// from what crossed its parent's horizon. The first comparison runs the
+/// layer's size at the *root's* seed, so only the size changes; the second
+/// re-runs it at the layer's own seed and must match the layer exactly, as the
+/// nesting size control does. Densities rather than counts, so that a world
+/// a quarter the area is not read as a quarter as lively.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct AreaControl {
+    pub depth: usize,
+    pub edge: usize,
+    pub layer_per_kilocell: f64,
+    pub root_seed_per_kilocell: f64,
+    pub own_seed_per_kilocell: f64,
+}
+
+impl AreaControl {
+    /// The layer reproduced exactly by a standalone universe at its own seed.
+    pub fn identical(&self) -> bool {
+        self.layer_per_kilocell == self.own_seed_per_kilocell
+    }
+}
+
+/// Run the area control for every layer of a chain.
+pub fn area_control(cfg: &Config, chain: &BootChain) -> Vec<AreaControl> {
+    let root = LayerSpec {
+        width: cfg.world.width,
+        height: cfg.world.height,
+        ticks: cfg.world.ticks,
+    };
+    chain
+        .layers
+        .iter()
+        .map(|l| {
+            let mut c = cfg.clone();
+            c.world.width = l.spec.width;
+            c.world.height = l.spec.height;
+            c.world.ticks = l.spec.ticks;
+            c.observer = layer::scale_probe(&cfg.observer, &root, &l.spec);
+            let at_root_seed = survey(&c, &c.rules, Constraints::ALL_ON);
+            c.world.seed = l.seed;
+            let at_own_seed = survey(&c, &c.rules, Constraints::ALL_ON);
+            AreaControl {
+                depth: l.depth,
+                edge: l.spec.height,
+                layer_per_kilocell: l.survey.per_kilocell(),
+                root_seed_per_kilocell: at_root_seed.per_kilocell(),
+                own_seed_per_kilocell: at_own_seed.per_kilocell(),
+            }
+        })
+        .collect()
 }
 
 /// Keep the horizon covering the same share of a smaller world.
@@ -833,6 +970,35 @@ mod tests {
             w = next;
         }
         assert!(displacement < MIN_DISPLACEMENT, "a block should not travel");
+    }
+
+    #[test]
+    fn shuffled_frames_find_fewer_bootloaders_than_real_ones() {
+        // The frame shuffle destroys every real trajectory. Whatever the
+        // detector still finds is its false-positive floor, and the real
+        // survey had better clear it on a Conway soup this size.
+        let c = cfg();
+        let ctl = shuffle_control(&c, &c.rules, Constraints::ALL_ON);
+        assert_eq!(ctl.real, survey(&c, &c.rules, Constraints::ALL_ON));
+        assert_eq!(ctl.real.cells, ctl.shuffled.cells);
+        assert!(
+            ctl.real.bootloaders > ctl.shuffled.bootloaders,
+            "real {} vs shuffled {}",
+            ctl.real.bootloaders,
+            ctl.shuffled.bootloaders
+        );
+        assert!(ctl.excess_density() > 0.0);
+    }
+
+    #[test]
+    fn tracking_is_a_pure_function_of_the_frames() {
+        let c = cfg();
+        let (fr, geom) = frames(&c, &c.rules, Constraints::ALL_ON);
+        let a = track(&fr, geom.w as f64, geom.h as f64, geom.cells());
+        let b = track(&fr, geom.w as f64, geom.h as f64, geom.cells());
+        assert_eq!(a, b);
+        assert_eq!(a.cells, 64 * 64);
+        assert!((a.per_kilocell() - a.bootloaders as f64 * 1000.0 / 4096.0).abs() < 1e-12);
     }
 
     #[test]

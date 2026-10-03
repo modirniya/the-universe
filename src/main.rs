@@ -411,7 +411,48 @@ fn execute_boot(
         report::write_gate(&chain, &ungated, out_dir)?.display()
     );
 
+    // The controls: what the tracker finds in shuffled frames, and what size
+    // alone does to the density of bootloaders.
+    println!();
+    let shuffle = bootloader::shuffle_control(
+        cfg,
+        &cfg.rules,
+        universe_core::constraints::Constraints::ALL_ON,
+    );
+    print!("{}", report::boot::shuffle_summary(&shuffle));
+    println!();
+    let area = bootloader::area_control(cfg, &chain);
+    print!("{}", report::boot::area_summary(&area));
+    println!(
+        "wrote {}",
+        report::boot::write_controls(&shuffle, &area, out_dir)?.display()
+    );
+
     if cfg.world.seeds > 1 {
+        let shuffles = with_rest(cfg, shuffle, |c| {
+            bootloader::shuffle_control(
+                c,
+                &c.rules,
+                universe_core::constraints::Constraints::ALL_ON,
+            )
+        });
+        println!();
+        print!("{}", report::boot::shuffle_ensemble_summary(&shuffles));
+        println!(
+            "wrote {}",
+            report::boot::write_shuffle(&shuffles, out_dir)?.display()
+        );
+        let areas = with_rest(cfg, area, |c| {
+            let ch = bootloader::run_boot_chain(c, root_budget, &c.nesting, |_, _| {});
+            bootloader::area_control(c, &ch)
+        });
+        println!();
+        print!("{}", report::boot::area_ensemble_summary(&areas));
+        println!(
+            "wrote {}",
+            report::boot::write_area(&areas, out_dir)?.display()
+        );
+
         let runs = with_rest(cfg, (chain, ungated), |c| {
             let run =
                 |gate| bootloader::run_boot_chain_with(c, root_budget, &c.nesting, gate, |_, _| {});

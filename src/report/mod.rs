@@ -20,6 +20,7 @@ use std::fmt::Write as _;
 use std::io;
 use std::path::{Path, PathBuf};
 
+pub mod boot;
 pub mod detect;
 pub mod information;
 pub mod limits;
@@ -834,23 +835,28 @@ pub fn boot_summary(chain: &BootChain) -> String {
 
     let _ = writeln!(
         s,
-        "{:>5}  {:>11}  {:>13}  {:>7}  {:>10}  {:>8}  {:>7}",
-        "depth", "world", "seed", "boots", "transport", "crossed", "child"
+        "{:>5}  {:>11}  {:>13}  {:>7}  {:>9}  {:>10}  {:>8}  {:>7}",
+        "depth", "world", "seed", "boots", "per 1000", "transport", "crossed", "child"
     );
-    let _ = writeln!(s, "{}", "-".repeat(72));
+    let _ = writeln!(s, "{}", "-".repeat(83));
     for l in &chain.layers {
         let _ = writeln!(
             s,
-            "{:>5}  {:>11}  {:>13}  {:>7}  {:>10.1}  {:>8}  {:>7}",
+            "{:>5}  {:>11}  {:>13}  {:>7}  {:>9.3}  {:>10.1}  {:>8}  {:>7}",
             l.depth,
             format!("{}x{}", l.spec.width, l.spec.height),
             l.seed % 1_000_000_000,
             l.survey.bootloaders,
+            l.survey.per_kilocell(),
             l.survey.transport,
             l.crossed,
             if l.booted_child { "yes" } else { "no" },
         );
     }
+    s.push_str(
+        "'per 1000' is bootloaders per thousand cells: a count falls with the world whatever the\n\
+         world does, a density need not.\n",
+    );
 
     s.push('\n');
     s.push_str(&boot_verdict(chain));
@@ -1313,20 +1319,26 @@ pub fn boot_ensemble_summary(runs: &[(u64, BootChain)]) -> String {
     let deepest = runs.iter().map(|(_, c)| c.layers.len()).max().unwrap_or(0);
     let _ = writeln!(
         s,
-        "\n{:>5}  {:>6}  {:<26} {:<26}",
-        "depth", "seeds", "boots: mean [min, max]", "edge: mean [min, max]"
+        "\n{:>5}  {:>6}  {:<26} {:<30} {:<26}",
+        "depth",
+        "seeds",
+        "boots: mean [min, max]",
+        "per 1000 cells: mean ± sd [ci]",
+        "edge: mean [min, max]"
     );
-    let _ = writeln!(s, "{}", "-".repeat(68));
+    let _ = writeln!(s, "{}", "-".repeat(100));
     for d in 0..deepest {
         let layers: Vec<&BootLayer> = runs.iter().filter_map(|(_, c)| c.layers.get(d)).collect();
         let boots = Spread::of(layers.iter().map(|l| l.survey.bootloaders as f64));
+        let density = crate::stats::Summary::of(layers.iter().map(|l| l.survey.per_kilocell()));
         let edge = Spread::of(layers.iter().map(|l| l.spec.width as f64));
         let _ = writeln!(
             s,
-            "{:>5}  {:>6}  {:<26} {:<26}",
+            "{:>5}  {:>6}  {:<26} {:<30} {:<26}",
             d + 1,
             layers.len(),
             spread_cell(&boots, 1),
+            limits::summary_cell(&density, 3),
             spread_cell(&edge, 1)
         );
     }
@@ -1338,9 +1350,20 @@ pub fn boot_ensemble_summary(runs: &[(u64, BootChain)]) -> String {
                 .all(|w| w[1].survey.bootloaders <= w[0].survey.bootloaders)
         })
         .count();
+    let density_falls = runs
+        .iter()
+        .filter(|(_, c)| {
+            c.layers.len() >= 2
+                && c.layers.last().unwrap().survey.per_kilocell()
+                    < c.layers[0].survey.per_kilocell()
+        })
+        .count();
     let _ = writeln!(
         s,
-        "\nbootloaders never rose down the chain in {thinning}/{n} seeds"
+        "\nbootloaders never rose down the chain in {}; a count falls with area, so read the\n\
+         density: the deepest layer is below the root per thousand cells in {}",
+        limits::share_cell(thinning, n),
+        limits::share_cell(density_falls, n)
     );
     let mut reasons: Vec<(&str, usize)> = Vec::new();
     for (_, c) in runs {
