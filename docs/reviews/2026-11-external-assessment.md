@@ -10,6 +10,8 @@ at the end of this file rather than editing the review itself.
 - **Reviewer:** an external AI-assisted review of the public repository (README, philosophy,
   derivations, claims ledger, audit, CONTRIBUTING, Cargo configuration, CI workflow).
 - **State reviewed:** v1.0 (`main` at `82b02bf` or thereabouts).
+- **Continued in:** [part 2](2026-11-external-assessment-2-reuse.md), on who could use the project
+  and for what.
 - **Fidelity:** the review is reproduced below as received, except that stray image captions
   scraped from unrelated web pages (journal and blog titles interleaved with the list of theories)
   and tracking parameters on links were removed. No wording of the assessment was changed.
