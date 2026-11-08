@@ -28,11 +28,25 @@ These are noted so they are not forgotten; none has been verified.
 - **Some proposed directions are already partly built.** "Can an agent infer properties of its
   execution environment" is close to what `detector` already asks of a rendering inhabitant
   (DET-FND-001/002). The triage should say how close, and what is missing.
-- **The framework extraction in §6 conflicts with standing decisions.** It would cut against
-  several decisions in `CLAUDE.md`: module names match theory names on purpose, the core keeps
-  minimal dependencies, and a milestone is finished before the next starts. The review itself says
-  extraction would be needed before the project could honestly be called a reusable framework. If
-  the revision takes this up, it is a decision for the author, not a refactor to slip in.
+- **The framework extraction in §6 is a possible pivot, to be judged on its size.**
+  - **The author's position (2026-11-08):** a research project can pivot if the pivot is worth it.
+    Expanding what the project can do is wanted, up to a limit: an idea too big to carry out, even
+    with AI-assisted development, is out. So the triage should size the extraction, not rule it
+    out because of current decisions.
+  - **What taking it up would revisit:** decisions in `CLAUDE.md`, changed deliberately and in the
+    same change. Module names match theory names. The core keeps minimal dependencies. A milestone
+    is finished before the next starts.
+  - **The review's own caveat:** the code would need extracting and generalising before the project
+    could honestly be called a reusable framework.
+  - **Smaller steps, noted when this was queued:** these are a starting point for sizing and have
+    not been estimated. Each could stand alone, and each would show whether the full extraction is
+    worth it.
+    1. The architecture paper the review proposes. It describes what already exists and changes no
+       code.
+    2. The claims ledger and its checker as a standalone tool for other repositories. The checker
+       already uses only the standard library.
+    3. One non-cosmological example built on the existing engine. This would test whether the
+       pieces really transfer before anything is renamed.
 
 ---
 
